@@ -2758,6 +2758,103 @@ tbody tr:hover {
     padding-right: 22px;
   }
 }
+
+/* Two-context presentation: compact CRM card and full Jornada workspace. */
+.card-shell {
+  min-height: 100vh;
+  background: #f6f8fb;
+  color: #1d2b3c;
+}
+.card-content {
+  width: 100%;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 18px 22px 24px;
+}
+.card-journey {
+  background: #fff;
+  border: 1px solid #e4eaf1;
+  border-radius: 14px;
+  box-shadow: 0 3px 16px rgba(28, 53, 82, 0.06);
+  overflow: hidden;
+}
+.card-journey-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 19px 24px 16px;
+  gap: 16px;
+}
+.card-journey-brand { display: flex; align-items: center; gap: 12px; }
+.card-journey-logo { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 11px; color: #fff; background: #2377bf; }
+.card-journey-brand strong { display: block; font-size: 20px; letter-spacing: -.4px; }
+.card-journey-brand span:not(.card-journey-logo) { display: block; margin-top: 3px; color: #758296; font-size: 12px; }
+.card-journey-actions { display: flex; align-items: center; gap: 15px; color: #788597; }
+.card-deal-title { margin-left: auto; margin-right: 10px; text-align: right; }
+.card-deal-title h1 { margin: 0; color: #1d2b3c; font-size: 16px; font-weight: 650; }
+.card-deal-title span { display: block; margin-top: 3px; color: #7e8b9b; font-size: 11px; }
+.card-query { font-size: 11px; }
+.card-refresh { color: #6d7a89; padding: 7px; border-radius: 8px; }
+.card-refresh:hover { background: #f1f5f9; color: #2377bf; }
+.card-journey-rule { height: 1px; background: #e9eef4; margin: 0 24px; }
+.card-warning { margin: 15px 24px 0; padding: 10px 12px; border-radius: 8px; background: #fff8ea; color: #7b5a26; display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.card-journey-layout { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(270px, .65fr); gap: 24px; padding: 23px 24px 26px; }
+.card-section-heading { display: flex; justify-content: space-between; align-items: baseline; gap: 10px; margin-bottom: 14px; }
+.card-section-heading span { color: #8793a3; font-size: 10px; letter-spacing: 1.35px; font-weight: 700; }
+.card-section-heading strong { color: #8995a5; font-size: 11px; font-weight: 500; }
+.card-timeline { list-style: none; margin: 0; padding: 4px 0 0 2px; position: relative; }
+.card-timeline::before { content: ""; position: absolute; left: 15px; top: 18px; bottom: 18px; width: 2px; background: #d8e0e9; }
+.card-timeline-item { display: grid; grid-template-columns: 32px minmax(0,1fr); gap: 12px; position: relative; padding-bottom: 10px; }
+.card-timeline-node { width: 28px; height: 28px; border-radius: 50%; z-index: 1; display: grid; place-items: center; background: #49b978; border: 3px solid #fff; color: #fff; box-shadow: 0 0 0 1px #49b978; }
+.card-timeline-item.current .card-timeline-node { background: #2789d8; box-shadow: 0 0 0 1px #2789d8, 0 0 0 5px #e2f1ff; }
+.card-timeline-item.final .card-timeline-node { background: #49b978; }
+.card-timeline-item.pending .card-timeline-node { background: #fff; box-shadow: 0 0 0 1px #aeb9c7; }
+.card-timeline-content { min-width: 0; border-radius: 12px; padding: 12px 14px 11px; background: #edf9f1; border: 1px solid #dff0e5; }
+.card-timeline-item.current .card-timeline-content { background: #e8f3ff; border-color: #d0e7fb; }
+.card-timeline-item.pending .card-timeline-content { background: #f5f7fa; border-color: #edf0f4; color: #697688; }
+.card-timeline-content > div { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
+.card-timeline-content strong { font-size: 14px; color: #1e2d3c; }
+.card-timeline-date { display: block; margin-top: 5px; color: #647286; font-size: 11px; }
+.card-timeline-actor { display: flex; align-items: center; gap: 5px; margin-top: 8px; color: #708093; font-size: 11px; }
+.card-status-pill { padding: 4px 10px; border-radius: 999px; white-space: nowrap; font-size: 10px; font-weight: 600; }
+.done-pill { background: #d2f1dc; color: #267542; }
+.current-pill { background: #cfe8fc; color: #1470b8; }
+.pending-pill { background: #e9edf3; color: #697688; }
+.card-info-panel { border: 1px solid #e2e9f1; border-radius: 12px; padding: 17px 18px; background: linear-gradient(180deg, #f8fbff 0, #fff 110px); align-self: start; }
+.card-info-list { margin: 0; }
+.card-info-list div { padding: 12px 0; border-bottom: 1px solid #edf1f5; }
+.card-info-list div:last-child { border-bottom: 0; }
+.card-info-list dt { color: #8290a0; font-size: 11px; margin-bottom: 4px; }
+.card-info-list dd { margin: 0; font-size: 13px; color: #253447; font-weight: 600; }
+.card-duration-block { margin-top: 12px; padding-top: 15px; border-top: 1px solid #e6edf4; }
+.card-duration-list { display: grid; gap: 12px; }
+.card-duration-list > div > div { display: flex; justify-content: space-between; gap: 8px; color: #68778a; font-size: 10px; margin-bottom: 5px; }
+.card-duration-list strong { color: #28384b; font-size: 10px; }
+.card-duration-track { display: block; height: 5px; border-radius: 99px; background: #edf1f5; overflow: hidden; }
+.card-duration-track i { display: block; height: 100%; border-radius: inherit; }
+.tracked-deals-panel { margin: 22px 0; }
+.tracked-deals-list { display: grid; }
+.tracked-deal-row { display: grid; grid-template-columns: 32px minmax(0,1fr) minmax(150px,.5fr) 18px; gap: 12px; align-items: center; padding: 12px 3px; border-bottom: 1px solid #edf0f3; }
+.tracked-deal-row:last-child { border-bottom: 0; }
+.tracked-deal-row:hover { background: #f8fbfe; }
+.tracked-deal-icon { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; color: #277cc1; background: #eaf4fd; }
+.tracked-deal-main, .tracked-deal-stage { min-width: 0; }
+.tracked-deal-main strong, .tracked-deal-stage span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tracked-deal-main strong { color: #253447; font-size: 12px; }
+.tracked-deal-main small, .tracked-deal-stage small { display: block; margin-top: 4px; color: #8995a4; font-size: 10px; }
+.tracked-deal-stage span { color: #42556c; font-size: 11px; }
+.tracked-deal-arrow { color: #9aa7b5; }
+@media (max-width: 720px) {
+  .card-content { padding: 10px; }
+  .card-journey-header { align-items: flex-start; padding: 15px; }
+  .card-query { display: none; }
+  .card-deal-title { display: none; }
+  .card-journey-rule { margin: 0 15px; }
+  .card-journey-layout { grid-template-columns: 1fr; padding: 18px 15px 20px; gap: 18px; }
+  .card-info-panel { order: -1; }
+  .tracked-deal-row { grid-template-columns: 30px minmax(0,1fr) 18px; }
+  .tracked-deal-stage { display: none; }
+}
 @media (prefers-reduced-motion: reduce) {
   html {
     scroll-behavior: auto;

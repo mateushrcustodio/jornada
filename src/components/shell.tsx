@@ -40,6 +40,17 @@ export function Shell({ children }: { children: ReactNode }) {
         : path === "/install"
           ? "Instalação"
           : navigation.find((n) => n.href === path)?.label || "Visão geral";
+  if (journey)
+    return (
+      <div className="card-shell">
+        <a href="#main-content" className="skip-link">
+          Pular para o conteúdo
+        </a>
+        <main id="main-content" className="card-content" tabIndex={-1}>
+          {children}
+        </main>
+      </div>
+    );
   return (
     <div className={`app-shell ${journey ? "journey-shell" : ""}`}>
       <a href="#main-content" className="skip-link">

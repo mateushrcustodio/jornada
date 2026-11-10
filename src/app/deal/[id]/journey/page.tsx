@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { Journey } from "@/components/journey";
+import { CompactJourney } from "@/components/compact-journey";
 export default async function Page({
   params,
 }: {
@@ -7,5 +7,5 @@ export default async function Page({
 }) {
   const { id } = await params;
   if (!/^[1-9]\d{0,9}$/.test(id)) notFound();
-  return <Journey id={Number(id)} />;
+  return <CompactJourney id={Number(id)} />;
 }

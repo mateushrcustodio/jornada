@@ -19,6 +19,7 @@ import Link from "next/link";
 import { useState } from "react";
 import type {
   DashboardData,
+  Deal,
   Filters,
   Movement,
   Period,
@@ -269,6 +270,7 @@ export function Dashboard({ view }: { view: View }) {
           {view === "overview" && (
             <>
               <Metrics data={data} />
+              <TrackedDeals data={data} />
               <div className="overview-grid">
                 <ActivityChart data={data} filters={filters!} />
                 <RetentionChart rows={data.retention} />
@@ -353,6 +355,27 @@ export function Dashboard({ view }: { view: View }) {
         </>
       ) : null}
     </>
+  );
+}
+
+function TrackedDeals({ data }: { data: DashboardData }) {
+  const unique = new Map<number, { deal: Deal; stageName: string; pipeline: string; movedTime?: string }>();
+  data.movements.forEach((row) => unique.set(row.deal.id, { deal: row.deal, stageName: row.stage.name, pipeline: data.pipelines.find((pipeline) => pipeline.id === row.deal.categoryId)?.name || "Pipeline não informado", movedTime: row.deal.movedTime }));
+  data.stalled.forEach((row) => unique.set(row.deal.id, { deal: row.deal, stageName: row.stage.name, pipeline: data.pipelines.find((pipeline) => pipeline.id === row.deal.categoryId)?.name || "Pipeline não informado", movedTime: row.deal.movedTime }));
+  const rows = [...unique.values()].sort((a, b) => Date.parse(b.movedTime || "") - Date.parse(a.movedTime || "")).slice(0, 8);
+  return (
+    <Panel title="Negócios acompanhados" eyebrow="VISÃO DOS CARDS" action={<span className="count-badge">{data.activeCount} ativos</span>} className="tracked-deals-panel">
+      {!rows.length ? <Empty title="Nenhum negócio encontrado" description="A consulta não retornou negócios para os filtros selecionados." /> : (
+        <div className="tracked-deals-list">
+          {rows.map((row) => <Link href={`/deal/${row.deal.id}/journey`} className="tracked-deal-row" key={row.deal.id}>
+            <span className="tracked-deal-icon"><Activity size={16} /></span>
+            <span className="tracked-deal-main"><strong>{row.deal.title}</strong><small>#{row.deal.id} · {row.pipeline}</small></span>
+            <span className="tracked-deal-stage"><span>{row.stageName}</span><small>{row.movedTime ? dateTime(row.movedTime, true) : "Data não informada"}</small></span>
+            <ArrowUpRight size={16} className="tracked-deal-arrow" />
+          </Link>)}
+        </div>
+      )}
+    </Panel>
   );
 }
 

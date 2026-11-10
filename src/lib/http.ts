@@ -4,8 +4,15 @@ import { appUrl } from "./bitrix/config";
 import { BitrixError, publicError } from "./bitrix/errors";
 import { ZodError } from "zod";
 export function assertSameOrigin(request: Request) {
+  const origin = request.headers.get("origin");
+  const allowedOrigins = new Set([appUrl()]);
+  if (process.env.NODE_ENV !== "production") {
+    allowedOrigins.add("http://localhost:3000");
+    allowedOrigins.add("http://127.0.0.1:3000");
+  }
   if (
-    request.headers.get("origin") !== appUrl() ||
+    !origin ||
+    !allowedOrigins.has(origin) ||
     !request.headers.get("content-type")?.includes("application/json")
   )
     throw new BitrixError(

@@ -4,8 +4,13 @@ const domains = (process.env.BITRIX_ALLOWED_DOMAINS || "")
   .split(",")
   .map((d) => d.trim())
   .filter((d) => /^[a-z0-9][a-z0-9.-]*\.[a-z]{2,}$/i.test(d));
+const devOrigins = [
+  ...domains,
+  ...(process.env.APP_URL ? [new URL(process.env.APP_URL).hostname] : []),
+].filter(Boolean);
 const config: NextConfig = {
   poweredByHeader: false,
+  allowedDevOrigins: devOrigins,
   async headers() {
     return [
       {
