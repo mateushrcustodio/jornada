@@ -30,34 +30,36 @@ Os testes E2E iniciam o servidor do build de produção automaticamente em modo 
 
 ## Rotas
 
-| Rota | Função |
-|---|---|
-| `/dashboard` | Visão geral, filtros, atividade, retenção e negócios parados |
-| `/dashboard/movements` | Movimentações paginadas, autoria quando disponível e links |
-| `/dashboard/stalled` | Negócios ativos acima do limite, inclusive sem movimentações recentes |
-| `/dashboard/stages` | Tempos médios, amostra, quantidade atual, quantidade e percentual parado por pipeline/etapa |
-| `/deal/:id/journey` | Timeline, duração por passagem, tempo total e etapa atual |
-| `/settings` | Preferências deste navegador |
-| `/install` | Instruções e registro dos placements pelo administrador |
-| `/api/bitrix/placement` | Handler POST comum para os dois placements e instalação |
-| `/api/auth/start` e `/api/auth/callback` | Conexão OAuth opcional fora do iframe |
-| `/api/dashboard`, `/api/catalog`, `/api/deal/:id` | Camada segura de consulta, sem tokens na resposta |
-| `/api/install` | Registro dos placements, exige sessão e `user.admin` |
+| Rota                                              | Função                                                                                      |
+| ------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| `/dashboard`                                      | Visão geral, filtros, atividade, retenção e negócios parados                                |
+| `/dashboard/movements`                            | Movimentações paginadas, autoria quando disponível e links                                  |
+| `/dashboard/stalled`                              | Negócios ativos acima do limite, inclusive sem movimentações recentes                       |
+| `/dashboard/stages`                               | Tempos médios, amostra, quantidade atual, quantidade e percentual parado por pipeline/etapa |
+| `/deal/:id/journey`                               | Timeline, duração por passagem, tempo total e etapa atual                                   |
+| `/settings`                                       | Preferências deste navegador                                                                |
+| `/install`                                        | Instruções e registro dos placements pelo administrador                                     |
+| `/api/bitrix/placement`                           | Handler POST comum para os dois placements e instalação                                     |
+| `/api/auth/start` e `/api/auth/callback`          | Conexão OAuth opcional fora do iframe                                                       |
+| `/api/dashboard`, `/api/catalog`, `/api/deal/:id` | Camada segura de consulta, sem tokens na resposta                                           |
+| `/api/deal/:id/benchmark`                         | Mediana de tempo dos negócios já fechados do mesmo funil e resultado, usada na autópsia     |
+| `/api/deal/:id/autopsy`                           | POST que publica a autópsia como comentário na timeline do negócio                          |
+| `/api/install`                                    | Registro dos placements, exige sessão e `user.admin`                                        |
 
 ## Variáveis de ambiente
 
 Todos os segredos são exclusivos do servidor; não há variáveis `NEXT_PUBLIC_*` de autenticação. `.env.local` não deve ser versionado.
 
-| Variável | Configuração |
-|---|---|
-| `APP_URL` | Origem pública do app, por exemplo `https://jornada.suaempresa.com`. Use HTTPS no Bitrix24. Local: `http://localhost:3000`. |
-| `DEMO_MODE` | `true` para dados sintéticos. Configure `false` para conectar ao portal. O registro real é bloqueado no modo demonstração. |
-| `BITRIX_ALLOWED_DOMAINS` | Domínios exatos permitidos, separados por vírgula, sem protocolo, porta ou caminho. Ex.: `empresa.bitrix24.com.br`. |
-| `BITRIX_CLIENT_ID` | Identificador OAuth da aplicação local cadastrada no Bitrix24. |
-| `BITRIX_CLIENT_SECRET` | Chave secreta OAuth, utilizada somente no servidor. |
-| `BITRIX_APP_CODE` | Opcional. Código retornado por `app.info`; se omitido, usa `BITRIX_CLIENT_ID`. Confira o código da sua aplicação se o portal informar valor diferente. |
-| `BITRIX_APPLICATION_TOKEN` | Opcional. Token de aplicação da instalação para verificação adicional de POSTs de placements. Se configurado, o handler exige correspondência exata. |
-| `BITRIX_MEMBER_ID` | Opcional. Restringe a instalação a um `member_id` conhecido. |
+| Variável                   | Configuração                                                                                                                                           |
+| -------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `APP_URL`                  | Origem pública do app, por exemplo `https://jornada.suaempresa.com`. Use HTTPS no Bitrix24. Local: `http://localhost:3000`.                            |
+| `DEMO_MODE`                | `true` para dados sintéticos. Configure `false` para conectar ao portal. O registro real é bloqueado no modo demonstração.                             |
+| `BITRIX_ALLOWED_DOMAINS`   | Domínios exatos permitidos, separados por vírgula, sem protocolo, porta ou caminho. Ex.: `empresa.bitrix24.com.br`.                                    |
+| `BITRIX_CLIENT_ID`         | Identificador OAuth da aplicação local cadastrada no Bitrix24.                                                                                         |
+| `BITRIX_CLIENT_SECRET`     | Chave secreta OAuth, utilizada somente no servidor.                                                                                                    |
+| `BITRIX_APP_CODE`          | Opcional. Código retornado por `app.info`; se omitido, usa `BITRIX_CLIENT_ID`. Confira o código da sua aplicação se o portal informar valor diferente. |
+| `BITRIX_APPLICATION_TOKEN` | Opcional. Token de aplicação da instalação para verificação adicional de POSTs de placements. Se configurado, o handler exige correspondência exata.   |
+| `BITRIX_MEMBER_ID`         | Opcional. Restringe a instalação a um `member_id` conhecido.                                                                                           |
 
 Depois de alterar domínios, reinicie e gere um novo build: a política `frame-ancestors` é construída na configuração do Next. Não publique esta demonstração como se estivesse conectada; desative explicitamente `DEMO_MODE` e configure a instalação real.
 
@@ -105,6 +107,7 @@ O POST do card contém `PLACEMENT=CRM_DEAL_DETAIL_TAB` e `PLACEMENT_OPTIONS={"ID
 - Chamadas REST usam o OAuth do usuário que abriu o widget, nunca uma credencial administrativa global. `crm.item.list` confirma quais negócios da amostra são legíveis; históricos de itens sem acesso não são enviados ao navegador. A timeline consulta `crm.item.get` antes do histórico.
 - Mutações internas exigem origem igual a `APP_URL` e conteúdo JSON. O handler de placement aceita a origem HTTPS do portal permitido. IDs do frontend nunca concedem acesso por conta própria.
 - Somente um administrador do portal pode registrar placements. As configurações de análise são preferências locais do usuário e não alteram o CRM.
+- **Única escrita no CRM:** o botão "Publicar na timeline" da autópsia chama `crm.timeline.comment.add` com o OAuth de quem clicou (o comentário aparece com o nome dele). O texto é montado no servidor a partir do histórico, nunca recebido do navegador, e só negócios já ganhos ou perdidos são aceitos. Exige o escopo `crm` já solicitado na instalação e a permissão de comentar no negócio. O app não detecta se a autópsia já foi publicada antes; cada clique cria um comentário novo.
 - As respostas da API e do handler usam `no-store`. Tokens não aparecem em URLs de redirecionamento, logs da aplicação, HTML ou JSON de resposta.
 - A política de framing permite somente a própria origem e os portais configurados. Não configure `X-Frame-Options: DENY/SAMEORIGIN` no proxy de hospedagem.
 
@@ -120,6 +123,16 @@ O POST do card contém `PLACEMENT=CRM_DEAL_DETAIL_TAB` e `PLACEMENT_OPTIONS={"ID
 - Datas e horários apresentados em `America/Sao_Paulo`. Períodos personalizados usam dias completos de Brasília; o período máximo é de 366 dias. Durações são corridas, sem calendário de expediente.
 - Todos os dados permanecem em memória durante a consulta. Preferências são guardadas exclusivamente no `localStorage` do navegador; é possível restaurar padrões.
 
+## Autópsia do negócio
+
+Em negócios ganhos ou perdidos, a aba do card mostra uma ficha com: resultado e ciclo, etapas puladas, voltas de etapa, etapa em que mais demorou e comparação com os fechados do mesmo funil. "Copiar texto" gera o resumo no formato de comentário do Bitrix24 (títulos em `[b]`).
+
+- **Etapas puladas:** etapas do funil entre a primeira visitada e o ponto de saída que o negócio nunca visitou. Em ganhos, o ponto de saída é a etapa final; em perdidos, a etapa mais avançada alcançada, para que "Perdido" nunca conte como pulada. Depende da ordem (`SORT`) das etapas no portal.
+- **Voltas:** passagem para uma etapa de ordem menor dentro do mesmo pipeline. Mudança de pipeline não conta como volta.
+- **Comparação:** mediana do ciclo (primeira a última entrada no histórico) dos 50 negócios fechados mais recentes do mesmo pipeline e do mesmo resultado, excluindo o próprio. Só aparece com pelo menos 3 negócios. A amostra é lida com as permissões de quem consultou e fica em cache na sessão por 10 minutos; a primeira consulta de um funil leva alguns segundos por causa do limite de requisições do Bitrix24.
+- A ficha não aponta responsáveis: a autoria das mudanças depende do que o histórico do portal registra.
+- No modo demonstração, "Publicar na timeline" é simulado e nada é enviado. Os negócios 9001 a 9006 são fechados de demonstração (9001 tem etapa pulada e volta).
+
 ## Limitações conhecidas
 
 1. **Validação em portal real pendente**: sem credenciais ou instalação fornecidas, os testes utilizam respostas controladas da API e modo demonstração. É necessário homologar a instalação, os escopos, a disponibilidade dos métodos/plano e as permissões com usuários do portal de destino.
@@ -133,17 +146,17 @@ O POST do card contém `PLACEMENT=CRM_DEAL_DETAIL_TAB` e `PLACEMENT_OPTIONS={"ID
 
 ## Organização dos arquivos criados
 
-| Grupo | Arquivos e responsabilidade |
-|---|---|
-| Configuração | `package.json`, `package-lock.json`, `tsconfig.json`, `next-env.d.ts`, `next.config.ts`, `eslint.config.mjs`, `.gitignore`, `.env.example`, `.env.local` local ignorado |
-| Orientações do framework | `AGENTS.md`, gerado automaticamente pelo Next.js durante o desenvolvimento |
-| App Router | `src/app/layout.tsx`, `page.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`, `globals.css`; páginas em `dashboard/`, `deal/`, `settings/` e `install/` |
-| Componentes | `src/components/dashboard.tsx`, `journey.tsx`, `settings-page.tsx`, `install-page.tsx`, `shell.tsx`, `provider.tsx`, `ui.tsx`, `use-resource.ts` |
-| Domínio | `src/lib/types.ts`, `calculations.ts`, `format.ts`, `settings.ts`, `demo.ts`, `http.ts` |
-| Integração | `src/lib/bitrix/auth.ts`, `client.ts`, `config.ts`, `errors.ts`, `service.ts`, `session.ts` |
-| Rotas da API | `src/app/api/{dashboard,catalog,deal,auth,bitrix,install}/` |
-| Verificação | `vitest.config.ts`, `playwright.config.ts`, `tests/calculations.test.ts`, `tests/bitrix.test.ts`, `tests/server-only.ts`, `tests/e2e/app.spec.ts` |
-| Documentação | `README.md`, `docs/payloads.json`, `docs/validation.md` |
+| Grupo                    | Arquivos e responsabilidade                                                                                                                                             |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Configuração             | `package.json`, `package-lock.json`, `tsconfig.json`, `next-env.d.ts`, `next.config.ts`, `eslint.config.mjs`, `.gitignore`, `.env.example`, `.env.local` local ignorado |
+| Orientações do framework | `AGENTS.md`, gerado automaticamente pelo Next.js durante o desenvolvimento                                                                                              |
+| App Router               | `src/app/layout.tsx`, `page.tsx`, `loading.tsx`, `error.tsx`, `not-found.tsx`, `globals.css`; páginas em `dashboard/`, `deal/`, `settings/` e `install/`                |
+| Componentes              | `src/components/dashboard.tsx`, `journey.tsx`, `settings-page.tsx`, `install-page.tsx`, `shell.tsx`, `provider.tsx`, `ui.tsx`, `use-resource.ts`                        |
+| Domínio                  | `src/lib/types.ts`, `calculations.ts`, `format.ts`, `settings.ts`, `demo.ts`, `http.ts`                                                                                 |
+| Integração               | `src/lib/bitrix/auth.ts`, `client.ts`, `config.ts`, `errors.ts`, `service.ts`, `session.ts`                                                                             |
+| Rotas da API             | `src/app/api/{dashboard,catalog,deal,auth,bitrix,install}/`                                                                                                             |
+| Verificação              | `vitest.config.ts`, `playwright.config.ts`, `tests/calculations.test.ts`, `tests/bitrix.test.ts`, `tests/server-only.ts`, `tests/e2e/app.spec.ts`                       |
+| Documentação             | `README.md`, `docs/payloads.json`, `docs/validation.md`                                                                                                                 |
 
 ## Referências oficiais consultadas
 

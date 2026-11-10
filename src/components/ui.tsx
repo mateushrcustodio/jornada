@@ -1,6 +1,5 @@
 "use client";
 import {
-  Activity,
   ArrowLeft,
   ArrowRight,
   ArrowUpRight,
@@ -30,13 +29,11 @@ export function StageBadge({
 }
 export function Panel({
   title,
-  eyebrow,
   children,
   action,
   className = "",
 }: {
   title: string;
-  eyebrow?: string;
   children: ReactNode;
   action?: ReactNode;
   className?: string;
@@ -44,10 +41,7 @@ export function Panel({
   return (
     <section className={`panel ${className}`}>
       <div className="panel-heading">
-        <div>
-          {eyebrow && <span className="eyebrow">{eyebrow}</span>}
-          <h2>{title}</h2>
-        </div>
+        <h2>{title}</h2>
         {action}
       </div>
       {children}
@@ -200,20 +194,6 @@ export function DealLink({
           <ArrowUpRight size={16} />
         </a>
       )}
-    </div>
-  );
-}
-export function DemoNotice() {
-  return (
-    <div className="demo-notice">
-      <Activity size={14} />
-      <span>
-        <strong>Modo demonstração</strong>
-        <span className="demo-detail">
-          {" "}
-          · Dados ilustrativos para explorar a aplicação.
-        </span>
-      </span>
     </div>
   );
 }

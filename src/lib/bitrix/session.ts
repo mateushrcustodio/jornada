@@ -2,7 +2,7 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { BitrixError } from "./errors";
-import type { Catalog } from "../types";
+import type { Catalog, Deal, HistoryEntry } from "../types";
 export interface Session {
   id: string;
   domain: string;
@@ -12,6 +12,14 @@ export interface Session {
   tokenExpiresAt: number;
   expiresAt: number;
   catalog?: { data: Catalog; expiresAt: number };
+  // Amostra de negócios fechados usada na autópsia. Fica na sessão do usuário
+  // porque a lista respeita as permissões de leitura de quem consultou.
+  closedSample?: {
+    key: string;
+    expiresAt: number;
+    deals: Deal[];
+    history: HistoryEntry[];
+  };
   refreshPending?: Promise<void>;
   nextRequestAt?: number;
 }

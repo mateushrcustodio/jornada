@@ -8,7 +8,13 @@ import type {
   RawStatus,
   Settings,
 } from "../types";
-import { buildDashboard, buildJourney } from "../calculations";
+import { buildDashboard, buildJourney, isClosed } from "../calculations";
+import {
+  autopsyText,
+  buildAutopsy,
+  buildBenchmark,
+  type Benchmark,
+} from "../autopsy";
 import { demoDataset } from "../demo";
 import { isDemo } from "./config";
 import { getSession, type Session } from "./session";
@@ -235,4 +241,106 @@ export async function getJourney(id: number) {
     false,
     session.domain,
   );
+}
+
+// Quantos negócios fechados recentes entram na comparação da autópsia.
+const SAMPLE_SIZE = 50;
+async function readClosedDeal(session: Session, id: number) {
+  const item = await rest<{ item: Deal }>(session, "crm.item.get", {
+    entityTypeId: 2,
+    id,
+  });
+  if (!item.result.item)
+    throw new BitrixError(
+      "NOT_FOUND",
+      "Negócio não encontrado ou sem permissão de acesso.",
+      404,
+    );
+  return normalizeDeals([item.result.item])[0];
+}
+export async function getBenchmark(id: number): Promise<Benchmark | null> {
+  const now = Date.now();
+  if (isDemo()) {
+    const { catalog, deals, history } = demoDataset(now);
+    const deal = deals.find((d) => d.id === id);
+    if (!deal)
+      throw new BitrixError(
+        "NOT_FOUND",
+        "Negócio não encontrado nesta demonstração.",
+        404,
+      );
+    return isClosed(deal)
+      ? buildBenchmark(deal, deals, history, catalog, now)
+      : null;
+  }
+  const session = await getSession();
+  const deal = await readClosedDeal(session, id);
+  if (!isClosed(deal)) return null;
+  const catalog = await getCatalog(session);
+  const key = `${deal.categoryId}:${deal.stageSemanticId}`;
+  let sample = session.closedSample;
+  if (!sample || sample.key !== key || sample.expiresAt <= now) {
+    // crm.item.list já respeita as permissões de leitura de quem consultou.
+    const page = await rest<{ items: Deal[] }>(session, "crm.item.list", {
+      entityTypeId: 2,
+      filter: {
+        categoryId: deal.categoryId,
+        stageSemanticId: deal.stageSemanticId,
+      },
+      select: dealSelect,
+      order: { movedTime: "DESC" },
+    });
+    const deals = normalizeDeals(unwrap<Deal>(page.result)).slice(
+      0,
+      SAMPLE_SIZE,
+    );
+    const history: HistoryEntry[] = [];
+    for (let i = 0; i < deals.length; i += 50)
+      history.push(
+        ...normalizeHistory(
+          await listAll<HistoryEntry>(session, "crm.stagehistory.list", {
+            entityTypeId: 2,
+            filter: { OWNER_ID: deals.slice(i, i + 50).map((d) => d.id) },
+            select: historySelect,
+            order: { CREATED_TIME: "ASC", ID: "ASC" },
+          }),
+        ),
+      );
+    sample = { key, expiresAt: now + 10 * 60000, deals, history };
+    session.closedSample = sample;
+  }
+  return buildBenchmark(deal, sample.deals, sample.history, catalog, now);
+}
+// Única escrita do app no CRM: um comentário na timeline, sempre por ação
+// explícita do usuário e com o texto montado no servidor.
+export async function publishAutopsy(id: number) {
+  const journey = await getJourney(id);
+  const benchmark = await getBenchmark(id).catch(() => null);
+  const autopsy = buildAutopsy(journey, benchmark);
+  if (!autopsy)
+    throw new BitrixError(
+      "NOT_CLOSED",
+      "A autópsia só existe para negócios já ganhos ou perdidos.",
+      409,
+    );
+  if (isDemo()) return { published: true, demo: true };
+  const session = await getSession();
+  try {
+    await rest(session, "crm.timeline.comment.add", {
+      fields: {
+        ENTITY_ID: id,
+        ENTITY_TYPE: "deal",
+        COMMENT: autopsyText(journey, autopsy),
+      },
+    });
+  } catch (error) {
+    if (error instanceof BitrixError && error.status === 403)
+      throw new BitrixError(
+        "ACCESS_DENIED",
+        "Você não tem permissão para comentar neste negócio.",
+        403,
+      );
+    throw error;
+  }
+  return { published: true, demo: false };
 }

@@ -2,10 +2,10 @@ import { test, expect } from "@playwright/test";
 test("painel, filtros e atualização manual", async ({ page }, testInfo) => {
   await page.goto("/dashboard");
   await expect(
-    page.getByRole("heading", { name: "Seu processo, em perspectiva." }),
+    page.getByRole("heading", { name: "Jornada", exact: true }),
   ).toBeVisible();
   await expect(
-    page.getByRole("button", { name: "Atualizar dados" }),
+    page.getByRole("button", { name: "Atualizar", exact: true }),
   ).toBeEnabled();
   await expect(
     page.getByText("Modo demonstração", { exact: true }),
@@ -16,13 +16,13 @@ test("painel, filtros e atualização manual", async ({ page }, testInfo) => {
   });
   await page.getByLabel("Pipeline", { exact: true }).selectOption("3");
   await expect(
-    page.getByRole("button", { name: "Atualizar dados" }),
+    page.getByRole("button", { name: "Atualizar", exact: true }),
   ).toBeEnabled();
   const responsePromise = page.waitForResponse(
     (r) =>
       r.url().endsWith("/api/dashboard") && r.request().method() === "POST",
   );
-  await page.getByRole("button", { name: "Atualizar dados" }).click();
+  await page.getByRole("button", { name: "Atualizar", exact: true }).click();
   const data = await (await responsePromise).json();
   expect(
     data.movements.every(
@@ -74,7 +74,7 @@ test("configurações persistem e afetam o painel", async ({ page }) => {
   await expect(page.getByRole("spinbutton")).toHaveValue("24");
   await page.goto("/dashboard");
   await expect(
-    page.getByRole("button", { name: "Atualizar dados" }),
+    page.getByRole("button", { name: "Atualizar", exact: true }),
   ).toBeEnabled();
   await expect(page.locator(".stat-card")).toHaveCount(3);
 });
@@ -132,14 +132,16 @@ test("telas de gestão, instalação e estado de negócio ausente", async ({
   page,
 }) => {
   for (const [path, title] of [
-    ["movements", "Cada movimento, um novo caminho."],
-    ["stalled", "Atenção onde faz diferença."],
-    ["stages", "Encontre o ritmo do seu funil."],
+    ["movements", "Movimentações"],
+    ["stalled", "Negócios parados"],
+    ["stages", "Etapas"],
   ]) {
     await page.goto(`/dashboard/${path}`);
-    await expect(page.getByRole("heading", { name: title })).toBeVisible();
     await expect(
-      page.getByRole("button", { name: "Atualizar dados" }),
+      page.getByRole("heading", { name: title, exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("button", { name: "Atualizar", exact: true }),
     ).toBeEnabled();
     expect(
       await page.evaluate(
@@ -206,10 +208,8 @@ test("histórico vazio e erro de consulta na aba do card", async ({ page }) => {
 
 test("navega pelo menu e usa a paginação das movimentações", async ({
   page,
-  isMobile,
 }) => {
   await page.goto("/dashboard");
-  if (isMobile) await page.getByRole("button", { name: "Abrir menu" }).click();
   await page
     .getByRole("navigation", { name: "Navegação principal" })
     .getByRole("link", { name: "Movimentações", exact: true })
@@ -217,10 +217,50 @@ test("navega pelo menu e usa a paginação das movimentações", async ({
   await expect(page).toHaveURL("/dashboard/movements");
   await page.getByLabel("Período", { exact: true }).selectOption("30d");
   await expect(
-    page.getByRole("button", { name: "Atualizar dados" }),
+    page.getByRole("button", { name: "Atualizar", exact: true }),
   ).toBeEnabled();
   await page.getByRole("button", { name: "Próxima página" }).click();
   await expect(page.locator(".pagination")).toContainText("Página 2");
   await page.getByRole("button", { name: "Página anterior" }).click();
   await expect(page.locator(".pagination")).toContainText("Página 1");
+});
+test("autópsia aparece só em negócio fechado, com desvios e publicação", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/deal/8061/journey");
+  await expect(page.getByText("Você está aqui")).toBeVisible();
+  await expect(page.getByText("Autópsia do negócio")).toHaveCount(0);
+
+  await page.goto("/deal/9001/journey");
+  const panel = page.locator(".autopsy-panel");
+  await expect(
+    panel.getByRole("heading", { name: "Autópsia do negócio" }),
+  ).toBeVisible();
+  await expect(panel.locator(".outcome.won")).toBeVisible();
+  await expect(panel.getByText("Negociação")).toBeVisible();
+  await expect(
+    panel.getByText("Proposta enviada → Qualificação"),
+  ).toBeVisible();
+  await expect(panel.getByText(/negócios ganhos deste funil/)).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+  await page.screenshot({
+    path: `docs/screenshots/autopsy-${testInfo.project.name}.png`,
+    fullPage: true,
+  });
+
+  const request = page.waitForRequest(
+    (r) => r.url().endsWith("/api/deal/9001/autopsy") && r.method() === "POST",
+  );
+  await panel.getByRole("button", { name: "Publicar na timeline" }).click();
+  await request;
+  await expect(panel.getByRole("status")).toContainText("Publicação simulada");
+  await expect(panel.getByRole("button", { name: "Publicada" })).toBeDisabled();
+
+  await page.goto("/deal/9005/journey");
+  await expect(panel.locator(".outcome.lost")).toBeVisible();
+  await expect(panel.getByText("Etapas puladas")).toBeVisible();
 });

@@ -1,17 +1,14 @@
 "use client";
 import {
-  Activity,
-  ArrowDown,
   ArrowRight,
   ArrowUpRight,
   CalendarDays,
-  ChartNoAxesCombined,
   Clock3,
-  Filter,
   Layers3,
+  Pause,
   RefreshCw,
+  Route,
   Settings2,
-  SlidersHorizontal,
   Timer,
   X,
 } from "lucide-react";
@@ -42,19 +39,18 @@ import {
 } from "./ui";
 
 const titles = {
-  overview: "Seu processo, em perspectiva.",
-  movements: "Cada movimento, um novo caminho.",
-  stalled: "Atenção onde faz diferença.",
-  stages: "Encontre o ritmo do seu funil.",
+  overview: "Jornada",
+  movements: "Movimentações",
+  stalled: "Negócios parados",
+  stages: "Etapas",
 };
 const subtitles = {
-  overview:
-    "Acompanhe a movimentação dos negócios e identifique gargalos por etapa.",
-  movements: "Explore as mudanças de etapa e o histórico dos seus negócios.",
-  stalled: "Identifique negócios que precisam de um novo impulso para avançar.",
-  stages:
-    "Entenda o tempo em cada etapa e descubra os pontos de maior retenção.",
+  overview: "Acompanhe a movimentação dos seus negócios.",
+  movements: "Veja as mudanças de etapa mais recentes.",
+  stalled: "Negócios que ficaram tempo demais na mesma etapa.",
+  stages: "Onde o tempo se concentra no seu funil.",
 };
+
 export function Dashboard({ view }: { view: View }) {
   const { settings, ready } = useApp();
   const [period, setPeriod] = useState<Period>();
@@ -98,58 +94,48 @@ export function Dashboard({ view }: { view: View }) {
     <>
       <div className="page-heading">
         <div>
-          <div className="page-kicker">
-            <span />
-            INTELIGÊNCIA DO SEU CRM
-          </div>
           <h1>{titles[view]}</h1>
           <p>{subtitles[view]}</p>
         </div>
         <div className="heading-actions">
+          <span className="last-query">
+            {data && !resource.loading && !resource.error
+              ? `Consulta: ${dateTime(data.queriedAt)}`
+              : resource.loading
+                ? "Consultando dados…"
+                : ""}
+          </span>
           <button
             className="button primary"
             onClick={refresh}
             disabled={resource.loading || !validCustom}
           >
             <RefreshCw size={16} className={resource.loading ? "spin" : ""} />
-            Atualizar dados
+            Atualizar
           </button>
-          <span className="last-query">
-            {data && !resource.loading && !resource.error
-              ? `Última consulta: ${dateTime(data.queriedAt)}`
-              : resource.loading
-                ? "Consultando dados…"
-                : "Consulta sob demanda"}
-          </span>
         </div>
       </div>
-      <div className="filters-panel">
-        <div className="filter-icon">
-          <SlidersHorizontal size={18} />
-        </div>
-        <label>
-          <span>Período</span>
-          <div className="select-wrap">
-            <CalendarDays size={16} />
-            <select
-              aria-label="Período"
-              value={effectivePeriod}
-              onChange={(e) => {
-                setPeriod(e.target.value as Period);
-                setClock(Date.now());
-              }}
-            >
-              <option value="today">Hoje</option>
-              <option value="24h">Últimas 24 horas</option>
-              <option value="7d">Últimos 7 dias</option>
-              <option value="30d">Últimos 30 dias</option>
-              <option value="custom">Personalizado</option>
-            </select>
-          </div>
+      <div className="filters">
+        <label className="filter">
+          <CalendarDays size={16} />
+          <span className="sr-only">Período</span>
+          <select
+            aria-label="Período"
+            value={effectivePeriod}
+            onChange={(e) => {
+              setPeriod(e.target.value as Period);
+              setClock(Date.now());
+            }}
+          >
+            <option value="today">Hoje</option>
+            <option value="24h">Últimas 24 horas</option>
+            <option value="7d">Últimos 7 dias</option>
+            <option value="30d">Últimos 30 dias</option>
+            <option value="custom">Personalizado</option>
+          </select>
         </label>
-        <span className="filter-divider" />
-        <label>
-          <span>Pipeline</span>
+        <label className="filter">
+          <span className="sr-only">Pipeline</span>
           <select
             aria-label="Pipeline"
             value={pipeline}
@@ -172,9 +158,8 @@ export function Dashboard({ view }: { view: View }) {
               ))}
           </select>
         </label>
-        <span className="filter-divider" />
-        <label>
-          <span>Etapa</span>
+        <label className="filter">
+          <span className="sr-only">Etapa</span>
           <select
             aria-label="Etapa"
             value={stage}
@@ -198,28 +183,21 @@ export function Dashboard({ view }: { view: View }) {
               ))}
           </select>
         </label>
-        <div className="filter-trailing">
-          {hasFilters ? (
-            <button
-              className="text-button"
-              onClick={() => {
-                setPipeline("");
-                setStage("");
-                setPeriod(settings.defaultPeriod);
-                setFrom("");
-                setTo("");
-              }}
-            >
-              Limpar
-              <X size={14} />
-            </button>
-          ) : (
-            <span>
-              <Filter size={13} />
-              Filtros da consulta
-            </span>
-          )}
-        </div>
+        {hasFilters && (
+          <button
+            className="text-button"
+            onClick={() => {
+              setPipeline("");
+              setStage("");
+              setPeriod(settings.defaultPeriod);
+              setFrom("");
+              setTo("");
+            }}
+          >
+            Limpar
+            <X size={14} />
+          </button>
+        )}
       </div>
       {effectivePeriod === "custom" && (
         <div className="custom-period">
@@ -253,47 +231,45 @@ export function Dashboard({ view }: { view: View }) {
         </p>
       )}
       {!validCustom ? (
-        <Empty
-          title="Escolha um período"
-          description="Selecione as datas inicial e final, em ordem, com intervalo de até 366 dias."
-        />
+        <div className="dashboard-body">
+          <Empty
+            title="Escolha um período"
+            description="Selecione as datas inicial e final, em ordem, com intervalo de até 366 dias."
+          />
+        </div>
       ) : resource.loading || !ready ? (
         <Skeleton />
       ) : resource.error ? (
-        <ErrorState
-          message={resource.error}
-          code={resource.code}
-          retry={refresh}
-        />
+        <div className="dashboard-body">
+          <ErrorState
+            message={resource.error}
+            code={resource.code}
+            retry={refresh}
+          />
+        </div>
       ) : data ? (
-        <>
+        <div className="dashboard-body">
           {view === "overview" && (
             <>
               <Metrics data={data} />
-              <TrackedDeals data={data} />
-              <div className="overview-grid">
-                <ActivityChart data={data} filters={filters!} />
-                <RetentionChart rows={data.retention} />
-              </div>
-              <div className="section-label">
-                <span>ACOMPANHAMENTO DO PIPELINE</span>
-                <span>
-                  Um olhar para o que precisa de atenção
-                  <ArrowDown size={13} />
-                </span>
-              </div>
-              <div className="detail-grid">
-                <Movements
-                  rows={data.movements}
-                  pipelines={data.pipelines}
-                  compact
-                />
-                <Stalled
-                  rows={data.stalled}
-                  pipelines={data.pipelines}
-                  compact
-                  hours={settings.stalledHours}
-                />
+              <div className="split">
+                <div className="stack">
+                  <Movements
+                    rows={data.movements}
+                    pipelines={data.pipelines}
+                    compact
+                  />
+                  <TrackedDeals data={data} />
+                </div>
+                <div className="stack">
+                  <RetentionChart rows={data.retention} />
+                  <Stalled
+                    rows={data.stalled}
+                    pipelines={data.pipelines}
+                    compact
+                    hours={settings.stalledHours}
+                  />
+                </div>
               </div>
             </>
           )}
@@ -325,14 +301,10 @@ export function Dashboard({ view }: { view: View }) {
           )}
           {view === "stages" && (
             <>
-              <div className="overview-grid stages-grid">
+              <div className="split">
                 <RetentionChart rows={data.retention} full />
-                <Panel title="Como ler os tempos" eyebrow="CONTEXTO DA ANÁLISE">
+                <Panel title="Como ler os tempos">
                   <div className="analysis-explainer">
-                    <span className="explain-icon">
-                      <Timer size={24} />
-                    </span>
-                    <h3>Tempo é uma pista valiosa.</h3>
                     <p>
                       A média considera passagens com entrada no período. Cada
                       passagem termina na próxima movimentação; uma etapa aberta
@@ -343,36 +315,76 @@ export function Dashboard({ view }: { view: View }) {
                       atual, inclusive sem movimentações recentes. Etapas
                       concluídas de ganho ou perda têm duração final zero.
                     </p>
-                    <span className="small-label">
-                      Cada pipeline é calculado separadamente.
-                    </span>
+                    <p>Cada pipeline é calculado separadamente.</p>
                   </div>
                 </Panel>
               </div>
               <RetentionTable rows={data.retention} />
             </>
           )}
-        </>
+        </div>
       ) : null}
     </>
   );
 }
 
 function TrackedDeals({ data }: { data: DashboardData }) {
-  const unique = new Map<number, { deal: Deal; stageName: string; pipeline: string; movedTime?: string }>();
-  data.movements.forEach((row) => unique.set(row.deal.id, { deal: row.deal, stageName: row.stage.name, pipeline: data.pipelines.find((pipeline) => pipeline.id === row.deal.categoryId)?.name || "Pipeline não informado", movedTime: row.deal.movedTime }));
-  data.stalled.forEach((row) => unique.set(row.deal.id, { deal: row.deal, stageName: row.stage.name, pipeline: data.pipelines.find((pipeline) => pipeline.id === row.deal.categoryId)?.name || "Pipeline não informado", movedTime: row.deal.movedTime }));
-  const rows = [...unique.values()].sort((a, b) => Date.parse(b.movedTime || "") - Date.parse(a.movedTime || "")).slice(0, 8);
+  const unique = new Map<
+    number,
+    { deal: Deal; stageName: string; pipeline: string; movedTime?: string }
+  >();
+  const add = (deal: Deal, stageName: string) =>
+    unique.set(deal.id, {
+      deal,
+      stageName,
+      pipeline:
+        data.pipelines.find((pipeline) => pipeline.id === deal.categoryId)
+          ?.name || "Pipeline não informado",
+      movedTime: deal.movedTime,
+    });
+  data.movements.forEach((row) => add(row.deal, row.stage.name));
+  data.stalled.forEach((row) => add(row.deal, row.stage.name));
+  const rows = [...unique.values()]
+    .sort(
+      (a, b) => Date.parse(b.movedTime || "") - Date.parse(a.movedTime || ""),
+    )
+    .slice(0, 5);
   return (
-    <Panel title="Negócios acompanhados" eyebrow="VISÃO DOS CARDS" action={<span className="count-badge">{data.activeCount} ativos</span>} className="tracked-deals-panel">
-      {!rows.length ? <Empty title="Nenhum negócio encontrado" description="A consulta não retornou negócios para os filtros selecionados." /> : (
+    <Panel
+      title="Negócios acompanhados"
+      action={<span className="count-badge">{data.activeCount} ativos</span>}
+      className="tracked-deals-panel"
+    >
+      {!rows.length ? (
+        <Empty
+          title="Nenhum negócio encontrado"
+          description="A consulta não retornou negócios para os filtros selecionados."
+        />
+      ) : (
         <div className="tracked-deals-list">
-          {rows.map((row) => <Link href={`/deal/${row.deal.id}/journey`} className="tracked-deal-row" key={row.deal.id}>
-            <span className="tracked-deal-icon"><Activity size={16} /></span>
-            <span className="tracked-deal-main"><strong>{row.deal.title}</strong><small>#{row.deal.id} · {row.pipeline}</small></span>
-            <span className="tracked-deal-stage"><span>{row.stageName}</span><small>{row.movedTime ? dateTime(row.movedTime, true) : "Data não informada"}</small></span>
-            <ArrowUpRight size={16} className="tracked-deal-arrow" />
-          </Link>)}
+          {rows.map((row) => (
+            <Link
+              href={`/deal/${row.deal.id}/journey`}
+              className="tracked-deal-row"
+              key={row.deal.id}
+            >
+              <span className="tracked-deal-main">
+                <strong>{row.deal.title}</strong>
+                <small>
+                  #{row.deal.id} · {row.pipeline}
+                </small>
+              </span>
+              <span className="tracked-deal-stage">
+                <span>{row.stageName}</span>
+                <small>
+                  {row.movedTime
+                    ? dateTime(row.movedTime)
+                    : "Data não informada"}
+                </small>
+              </span>
+              <ArrowUpRight size={16} className="tracked-deal-arrow" />
+            </Link>
+          ))}
         </div>
       )}
     </Panel>
@@ -387,23 +399,23 @@ function Metrics({ data }: { data: DashboardData }) {
       label: "Movimentações",
       value: data.movements.length.toLocaleString("pt-BR"),
       detail: "registradas no período",
-      icon: Activity,
-      color: "orange",
+      icon: Route,
+      color: "blue",
     },
     {
       key: "active" as const,
       label: "Negócios em andamento",
       value: data.activeCount.toLocaleString("pt-BR"),
-      detail: "ativos nos filtros selecionados",
+      detail: "ativos nos filtros",
       icon: Layers3,
-      color: "blue",
+      color: "ink",
     },
     {
       key: "stalled" as const,
-      label: "Precisam de atenção",
+      label: "Parados",
       value: data.stalled.length.toLocaleString("pt-BR"),
       detail: `há ${settings.stalledHours}h ou mais na etapa`,
-      icon: Clock3,
+      icon: Pause,
       color: "amber",
     },
     {
@@ -414,121 +426,24 @@ function Metrics({ data }: { data: DashboardData }) {
         ? "por passagem no período"
         : "sem passagens no período",
       icon: Timer,
-      color: "green",
+      color: "ink",
     },
   ];
   return (
     <div className="stat-grid">
       {metrics
         .filter((m) => settings.indicators[m.key])
-        .map(({ key, label, value, detail, icon: Icon, color }) => (
+        .map(({ key, label, value, detail, color }) => (
           <article className={`stat-card stat-${color}`} key={key}>
-            <div className="stat-top">
-              <span>{label}</span>
-              <span className="stat-icon">
-                <Icon size={18} />
-              </span>
-            </div>
+            <div className="stat-top">{label}</div>
             <strong className="stat-value">{value}</strong>
-            <span className="stat-detail">
-              <span className="tiny-dot" />
-              {detail}
-            </span>
+            <span className="stat-detail">{detail}</span>
           </article>
         ))}
     </div>
   );
 }
-function ActivityChart({
-  data,
-  filters,
-}: {
-  data: DashboardData;
-  filters: Filters;
-}) {
-  const start = Date.parse(filters.from),
-    end = Date.parse(filters.to);
-  const binCount = Math.max(
-    1,
-    Math.min(12, Math.ceil((end - start) / 86400000)),
-  );
-  const width = Math.max(1, (end - start) / binCount);
-  const bins = Array.from({ length: binCount }, (_, i) => ({
-    time: start + i * width,
-    count: 0,
-  }));
-  data.movements.forEach((m) => {
-    const i = Math.min(
-      binCount - 1,
-      Math.floor((Date.parse(m.entry.CREATED_TIME) - start) / width),
-    );
-    if (i >= 0) bins[i].count++;
-  });
-  const max = Math.max(1, ...bins.map((b) => b.count));
-  return (
-    <Panel
-      title="O ritmo das movimentações"
-      eyebrow="ATIVIDADE NO PERÍODO"
-      action={
-        <span className="chart-legend">
-          <span />
-          Movimentações
-        </span>
-      }
-      className="activity-panel"
-    >
-      {!data.movements.length ? (
-        <Empty
-          title="Sem atividade no período"
-          description="Nenhuma movimentação no período selecionado."
-        />
-      ) : (
-        <>
-          <div
-            className="activity-chart"
-            aria-label="Movimentações por intervalo"
-          >
-            <div className="chart-grid-lines">
-              <span>{max}</span>
-              <span>{Math.round(max / 2)}</span>
-              <span>0</span>
-            </div>
-            <div className="chart-bars">
-              {bins.map((b, i) => (
-                <div className="chart-column" key={i}>
-                  <span className="bar-count">{b.count}</span>
-                  <div
-                    className={`activity-bar ${i === bins.length - 1 ? "last" : ""}`}
-                    style={{
-                      height: `${Math.max(2, (b.count / max) * 118)}px`,
-                    }}
-                  />
-                  <span className="bar-label">
-                    {new Intl.DateTimeFormat("pt-BR", {
-                      day: "2-digit",
-                      month: "2-digit",
-                      timeZone: "America/Sao_Paulo",
-                    }).format(new Date(b.time))}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div className="chart-footer">
-            <span>
-              <strong>{data.movements.length}</strong> mudanças de etapa no
-              período
-            </span>
-            <span>
-              Consulta sob demanda
-              <ArrowUpRight size={13} />
-            </span>
-          </div>
-        </>
-      )}
-    </Panel>
-  );
-}
+
 function RetentionChart({
   rows,
   full = false,
@@ -540,8 +455,7 @@ function RetentionChart({
   const max = Math.max(1, ...visible.map((r) => r.average));
   return (
     <Panel
-      title="Onde o tempo se concentra"
-      eyebrow="TEMPO MÉDIO POR ETAPA"
+      title="Tempo médio por etapa"
       action={
         !full && (
           <Link
@@ -562,17 +476,16 @@ function RetentionChart({
         />
       ) : (
         <div className="retention-bars">
-          {visible.map((r, i) => (
+          {visible.map((r) => (
             <div
               className="retention-row"
               key={`${r.stage.categoryId}:${r.stage.id}`}
             >
               <div className="retention-label">
-                <span className="rank">0{i + 1}</span>
                 <div>
                   <strong>{r.stage.name}</strong>
                   <span>
-                    {r.pipeline} · {r.sampleDeals} negócios na amostra
+                    {r.pipeline} · {r.sampleDeals} negócios
                   </span>
                 </div>
                 <strong className="retention-value">
@@ -580,23 +493,16 @@ function RetentionChart({
                 </strong>
               </div>
               <div className="bar-track">
-                <span
-                  style={{
-                    width: `${(r.average / max) * 100}%`,
-                    background: i === 0 ? "#d57b57" : r.stage.color,
-                  }}
-                />
+                <span style={{ width: `${(r.average / max) * 100}%` }} />
               </div>
             </div>
           ))}
         </div>
       )}
-      <div className="panel-footnote">
-        Da maior para a menor permanência média.
-      </div>
     </Panel>
   );
 }
+
 function Movements({
   rows,
   pipelines,
@@ -616,7 +522,6 @@ function Movements({
   return (
     <Panel
       title="Últimas movimentações"
-      eyebrow="HISTÓRICO DOS NEGÓCIOS"
       className="movements-panel"
       action={
         compact ? (
@@ -631,17 +536,46 @@ function Movements({
     >
       {!rows.length ? (
         <Empty />
+      ) : compact ? (
+        <div className="movement-list">
+          {visible.map((row) => (
+            <div className="movement-row" key={row.entry.ID}>
+              <div className="row-main">
+                <strong>
+                  <Link href={`/deal/${row.deal.id}/journey`}>
+                    {row.deal.title}
+                  </Link>
+                </strong>
+                <span>#{row.deal.id}</span>
+              </div>
+              <div className="row-stages">
+                {row.previousStage ? (
+                  <>
+                    <StageBadge stage={row.previousStage} />
+                    <ArrowRight size={12} />
+                  </>
+                ) : (
+                  <span>Novo</span>
+                )}
+                <StageBadge stage={row.stage} />
+              </div>
+              <time className="row-time" dateTime={row.entry.CREATED_TIME}>
+                {dateTime(row.entry.CREATED_TIME)}
+              </time>
+            </div>
+          ))}
+        </div>
       ) : (
         <>
           <div className="table-scroll">
-            <table className={compact ? "compact-table" : ""}>
+            <table>
               <thead>
                 <tr>
                   <th>Negócio</th>
-                  {!compact && <th>Pipeline</th>}
+                  <th>Pipeline</th>
                   <th>Movimentação</th>
                   <th>Quando</th>
-                  {!compact && <th>Movido por</th>}
+                  <th>Movido por</th>
                 </tr>
               </thead>
               <tbody>
@@ -654,56 +588,48 @@ function Movements({
                         url={row.url}
                       />
                     </td>
-                    {!compact && (
-                      <td>
-                        <span className="pipeline-label">
-                          {pipelines.find((p) => p.id === row.entry.CATEGORY_ID)
-                            ?.name || `Pipeline #${row.entry.CATEGORY_ID}`}
-                        </span>
-                      </td>
-                    )}
+                    <td>
+                      <span className="pipeline-label">
+                        {pipelines.find((p) => p.id === row.entry.CATEGORY_ID)
+                          ?.name || `Pipeline #${row.entry.CATEGORY_ID}`}
+                      </span>
+                    </td>
                     <td>
                       <div className="movement-stages">
-                        <span className="previous-stage">
-                          {row.previousStage?.name || "Primeira entrada"}
-                        </span>
-                        <div>
-                          <ArrowRight size={12} />
-                          <StageBadge stage={row.stage} />
-                        </div>
+                        {row.previousStage ? (
+                          <>
+                            <StageBadge stage={row.previousStage} />
+                            <ArrowRight size={12} />
+                          </>
+                        ) : (
+                          <span>Primeira entrada</span>
+                        )}
+                        <StageBadge stage={row.stage} />
                       </div>
                     </td>
                     <td className="date-cell">
                       {dateTime(row.entry.CREATED_TIME)}
                     </td>
-                    {!compact && (
-                      <td className="actor-cell">
-                        {row.actor || "Não informado pela API"}
-                      </td>
-                    )}
+                    <td className="actor-cell">
+                      {row.actor || "Não informado pela API"}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-          {compact ? (
-            <div className="panel-footnote">
-              Exibindo as {Math.min(size, rows.length)} movimentações mais
-              recentes.
-            </div>
-          ) : (
-            <Pagination
-              page={page}
-              total={rows.length}
-              size={size}
-              onChange={setPage}
-            />
-          )}
+          <Pagination
+            page={page}
+            total={rows.length}
+            size={size}
+            onChange={setPage}
+          />
         </>
       )}
     </Panel>
   );
 }
+
 function Stalled({
   rows,
   pipelines,
@@ -724,8 +650,7 @@ function Stalled({
   const visible = rows.slice((page - 1) * size, page * size);
   return (
     <Panel
-      title="Negócios que pedem atenção"
-      eyebrow={`PARADOS HÁ ${hours}H OU MAIS`}
+      title="Parados há mais tempo"
       className="stalled-panel"
       action={
         compact ? (
@@ -746,25 +671,27 @@ function Stalled({
       ) : compact ? (
         <>
           <div className="stalled-list">
-            {visible.map((row) => (
-              <article className="stalled-item" key={row.deal.id}>
-                <div className="stalled-item-top">
-                  <span className="company-avatar">
-                    {row.deal.title.charAt(0)}
-                  </span>
-                  <div>
-                    <Link href={`/deal/${row.deal.id}/journey`}>
-                      <strong>{row.deal.title}</strong>
-                    </Link>
-                    <span>
-                      #{row.deal.id} · {row.stage.name}
-                    </span>
-                    <span>
-                      {
-                        pipelines.find((p) => p.id === row.deal.categoryId)
-                          ?.name
-                      }
-                    </span>
+            {visible.map((row) => {
+              // Crítico: o dobro (ou mais) do limite configurado.
+              const critical = row.duration >= hours * 2 * 3600000;
+              return (
+                <article
+                  className={`stalled-item ${critical ? "critical" : ""}`}
+                  key={row.deal.id}
+                >
+                  <div className="stalled-item-top">
+                    <div>
+                      <Link href={`/deal/${row.deal.id}/journey`}>
+                        <strong>{row.deal.title}</strong>
+                      </Link>
+                      <span>
+                        #{row.deal.id} · {row.stage.name}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="stalled-time">
+                    <span>{duration(row.duration)}</span>
+                    {critical && <span>crítico</span>}
                   </div>
                   <Link
                     className="icon-button"
@@ -773,16 +700,9 @@ function Stalled({
                   >
                     <ArrowUpRight size={16} />
                   </Link>
-                </div>
-                <div className="stalled-time">
-                  <span>
-                    <Clock3 size={13} />
-                    {duration(row.duration)} na etapa
-                  </span>
-                  <span>Acima do limite</span>
-                </div>
-              </article>
-            ))}
+                </article>
+              );
+            })}
           </div>
           <Link href="/dashboard/stalled" className="panel-link">
             Ver todos os negócios parados
@@ -846,16 +766,13 @@ function Stalled({
     </Panel>
   );
 }
+
 function RetentionTable({ rows }: { rows: Retention[] }) {
   const [requestedPage, setPage] = useState(1);
   const size = 10,
     page = Math.min(requestedPage, Math.max(1, Math.ceil(rows.length / size)));
   return (
-    <Panel
-      title="Retenção por etapa"
-      eyebrow="DETALHAMENTO"
-      action={<ChartNoAxesCombined size={20} />}
-    >
+    <Panel title="Detalhamento por etapa">
       {!rows.length ? (
         <Empty />
       ) : (

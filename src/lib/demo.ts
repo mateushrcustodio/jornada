@@ -98,5 +98,97 @@ export function demoDataset(now = Date.now()): {
       movedTime: last.CREATED_TIME,
     });
   });
+  // Negócios já encerrados há meses (fora dos períodos do painel). Servem de
+  // amostra para a autópsia e incluem desvios: etapa pulada e volta de etapa.
+  // Cada passo é [índice da etapa, dias desde o passo anterior].
+  const closed: [number, string, [number, number][]][] = [
+    [
+      9001,
+      "Delta · Contrato anual",
+      [
+        [0, 0],
+        [1, 2.5],
+        [2, 6],
+        [1, 4],
+        [2, 3.5],
+        [4, 2],
+      ],
+    ],
+    [
+      9002,
+      "Ecos · Plano trimestral",
+      [
+        [0, 0],
+        [1, 3],
+        [2, 9],
+        [3, 8],
+        [4, 2],
+      ],
+    ],
+    [
+      9003,
+      "Faro · Pacote básico",
+      [
+        [0, 0],
+        [1, 1],
+        [2, 2],
+        [3, 2],
+        [4, 1],
+      ],
+    ],
+    [
+      9004,
+      "Gaia · Renovação",
+      [
+        [0, 0],
+        [1, 4],
+        [5, 3],
+      ],
+    ],
+    [
+      9005,
+      "Haste · Consultoria",
+      [
+        [0, 0],
+        [5, 6],
+      ],
+    ],
+    [
+      9006,
+      "Ibis · Licenças",
+      [
+        [0, 0],
+        [1, 2],
+        [2, 7],
+        [5, 4],
+      ],
+    ],
+  ];
+  closed.forEach(([id, title, steps], index) => {
+    let time = now - (100 + index * 12) * 86400000;
+    steps.forEach(([stage, days], j) => {
+      time += days * 86400000;
+      history.push({
+        ID: entryId++,
+        OWNER_ID: id,
+        CATEGORY_ID: 0,
+        STAGE_ID: ids[stage],
+        STAGE_SEMANTIC_ID: stage === 4 ? "S" : stage === 5 ? "F" : "P",
+        CREATED_TIME: new Date(time).toISOString(),
+        MOVED_BY_NAME: ["Mariana Silva", "Pedro Santos", "Camila Oliveira"][
+          (index + j) % 3
+        ],
+      });
+    });
+    const last = history.at(-1)!;
+    deals.push({
+      id,
+      title,
+      categoryId: 0,
+      stageId: last.STAGE_ID,
+      stageSemanticId: last.STAGE_SEMANTIC_ID,
+      movedTime: last.CREATED_TIME,
+    });
+  });
   return { catalog, deals, history };
 }

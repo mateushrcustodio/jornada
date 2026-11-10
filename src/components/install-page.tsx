@@ -62,25 +62,15 @@ export function InstallPage() {
       )}
       <div className="page-heading">
         <div>
-          <div className="page-kicker">
-            <span />
-            PRONTO PARA CONECTAR
-          </div>
-          <h1>O seu CRM, com mais perspectiva.</h1>
-          <p>
-            Conecte o Jornada ao Bitrix24 e acompanhe cada etapa do seu
-            processo.
-          </p>
+          <h1>Instalação</h1>
+          <p>Conecte o Jornada ao Bitrix24 e acompanhe cada etapa.</p>
         </div>
         <span className="settings-emblem">
           <Link2 size={28} />
         </span>
       </div>
       <div className="install-grid">
-        <Panel
-          title="Uma integração, dois pontos de vista"
-          eyebrow="JORNADA + BITRIX24"
-        >
+        <Panel title="Uma integração, dois pontos de vista">
           <div className="install-content">
             <span className="install-logo">
               <Route size={35} />
@@ -110,7 +100,7 @@ export function InstallPage() {
             </div>
           </div>
         </Panel>
-        <Panel title="Instalação da aplicação local" eyebrow="PASSO A PASSO">
+        <Panel title="Instalação da aplicação local">
           <ol className="install-steps">
             <li>
               <strong>Publique em um endereço HTTPS</strong>

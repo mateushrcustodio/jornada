@@ -77,14 +77,8 @@ function SettingsForm({
     <>
       <div className="page-heading">
         <div>
-          <div className="page-kicker">
-            <span />
-            DO SEU JEITO
-          </div>
-          <h1>Um olhar alinhado à sua operação.</h1>
-          <p>
-            Ajuste os critérios de acompanhamento do seu processo comercial.
-          </p>
+          <h1>Configurações</h1>
+          <p>Ajuste os critérios de acompanhamento dos seus negócios.</p>
         </div>
         <span className="settings-emblem">
           <Settings2 size={28} />
@@ -99,7 +93,7 @@ function SettingsForm({
       </div>
       <form onSubmit={submit} className="settings-form">
         <div className="settings-grid">
-          <Panel title="Ritmo de acompanhamento" eyebrow="REGRAS DO PAINEL">
+          <Panel title="Ritmo de acompanhamento">
             <div className="form-fields">
               <label className="form-field">
                 <span>Quando um negócio está parado?</span>
@@ -146,7 +140,7 @@ function SettingsForm({
               </label>
             </div>
           </Panel>
-          <Panel title="Indicadores em destaque" eyebrow="VISÃO GERAL">
+          <Panel title="Indicadores em destaque">
             <div className="toggle-list">
               {Object.entries({
                 movements: [
@@ -195,7 +189,6 @@ function SettingsForm({
           </Panel>
           <Panel
             title="Pipelines monitorados"
-            eyebrow="ESCOPO DA CONSULTA"
             action={
               <button
                 type="button"
@@ -235,7 +228,7 @@ function SettingsForm({
               )}
             </div>
           </Panel>
-          <Panel title="Etapas ignoradas" eyebrow="EXCEÇÕES DA ANÁLISE">
+          <Panel title="Etapas ignoradas">
             <p className="form-intro">
               As etapas selecionadas não aparecem nos indicadores do painel. O
               histórico do card continua completo.
