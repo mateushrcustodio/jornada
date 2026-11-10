@@ -1,0 +1,51 @@
+{
+  "notice": "Exemplos ilustrativos, sem credenciais reais. Tokens são recebidos e utilizados exclusivamente pelo servidor.",
+  "placementCardPost": {
+    "DOMAIN": "empresa.bitrix24.com.br",
+    "AUTH_ID": "<oauth-access-token>",
+    "AUTH_EXPIRES": "3600",
+    "REFRESH_ID": "<oauth-refresh-token>",
+    "APPLICATION_TOKEN": "<optional-application-token>",
+    "member_id": "<portal-member-id>",
+    "PLACEMENT": "CRM_DEAL_DETAIL_TAB",
+    "PLACEMENT_OPTIONS": "{\"ID\":\"8061\"}"
+  },
+  "placementAnalyticsPost": {
+    "DOMAIN": "empresa.bitrix24.com.br",
+    "AUTH_ID": "<oauth-access-token>",
+    "AUTH_EXPIRES": "3600",
+    "REFRESH_ID": "<oauth-refresh-token>",
+    "member_id": "<portal-member-id>",
+    "PLACEMENT": "CRM_ANALYTICS_MENU",
+    "PLACEMENT_OPTIONS": "{}"
+  },
+  "stageHistoryRequest": {
+    "entityTypeId": 2,
+    "filter": { ">=CREATED_TIME": "2026-11-01T00:00:00-03:00", "<=CREATED_TIME": "2026-11-09T23:59:59-03:00", "CATEGORY_ID": 3 },
+    "order": { "CREATED_TIME": "DESC", "ID": "DESC" },
+    "select": ["ID", "OWNER_ID", "CATEGORY_ID", "STAGE_ID", "STAGE_SEMANTIC_ID", "CREATED_TIME"],
+    "start": 0
+  },
+  "stageHistoryResponse": {
+    "result": {
+      "items": [
+        { "ID": 901, "OWNER_ID": 8061, "CATEGORY_ID": 3, "STAGE_ID": "C3:NEW", "STAGE_SEMANTIC_ID": "P", "CREATED_TIME": "2026-11-02T10:00:00-03:00" },
+        { "ID": 902, "OWNER_ID": 8061, "CATEGORY_ID": 3, "STAGE_ID": "C3:EXECUTING", "STAGE_SEMANTIC_ID": "P", "CREATED_TIME": "2026-11-05T14:00:00-03:00" }
+      ]
+    },
+    "total": 2
+  },
+  "paginationExample": { "result": { "items": [] }, "next": 50, "total": 120 },
+  "completeHistoryRequest": { "entityTypeId": 2, "filter": { "OWNER_ID": [8061, 8062] }, "order": { "CREATED_TIME": "ASC", "ID": "ASC" } },
+  "itemGetRequest": { "entityTypeId": 2, "id": 8061 },
+  "itemGetResponse": { "result": { "item": { "id": 8061, "title": "Acme · Expansão comercial", "categoryId": 3, "stageId": "C3:EXECUTING", "stageSemanticId": "P", "movedTime": "2026-11-05T14:00:00-03:00", "movedBy": 17 } } },
+  "activeItemsRequest": { "entityTypeId": 2, "filter": { "stageSemanticId": "P", "categoryId": 3 }, "select": ["id", "title", "categoryId", "stageId", "stageSemanticId", "movedTime", "movedBy"] },
+  "authorizedItemsRequest": { "entityTypeId": 2, "filter": { "@id": [8061, 8062] }, "select": ["id", "title", "categoryId", "stageId", "stageSemanticId", "movedTime", "movedBy"] },
+  "categoryListRequest": { "entityTypeId": 2 },
+  "categoryListResponse": { "result": { "categories": [{ "id": 0, "name": "Comercial" }, { "id": 3, "name": "Enterprise" }] } },
+  "defaultStageDirectoryRequest": { "entityId": "DEAL_STAGE" },
+  "otherPipelineStageDirectoryRequest": { "entityId": "DEAL_STAGE_3" },
+  "stageDirectoryResponse": { "result": [{ "STATUS_ID": "C3:NEW", "NAME": "Novo negócio", "SORT": "10" }, { "STATUS_ID": "C3:EXECUTING", "NAME": "Negociação", "SORT": "40" }] },
+  "permissionError": { "error": "ACCESS_DENIED", "error_description": "Access denied" },
+  "publicPermissionError": { "code": "ACCESS_DENIED", "error": "Você não tem permissão para consultar o histórico desses negócios." }
+}
