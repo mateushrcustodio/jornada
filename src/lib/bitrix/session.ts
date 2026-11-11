@@ -11,7 +11,11 @@ export interface Session {
   refreshToken: string;
   tokenExpiresAt: number;
   expiresAt: number;
+  // ID do usuário no portal (método profile). Sem ele, nenhuma sessão é
+  // reaproveitada nem herda cache, para não misturar dados entre usuários.
+  userId?: number;
   catalog?: { data: Catalog; expiresAt: number };
+  catalogPending?: Promise<Catalog>;
   userNames?: Map<number, string>;
   // Amostra de negócios fechados usada na autópsia. Fica na sessão do usuário
   // porque a lista respeita as permissões de leitura de quem consultou.
@@ -21,8 +25,11 @@ export interface Session {
     deals: Deal[];
     history: HistoryEntry[];
   };
+  closedSamplePending?: {
+    key: string;
+    promise: Promise<{ deals: Deal[]; history: HistoryEntry[] }>;
+  };
   refreshPending?: Promise<void>;
-  nextRequestAt?: number;
 }
 // Uma instância Node, sem persistência. Reinícios exigem reabrir o app no portal.
 const globalSessions = globalThis as unknown as {
@@ -41,9 +48,42 @@ export function cookieOptions() {
     maxAge: 8 * 3600,
   };
 }
-export function createSession(
-  data: Omit<Session, "id" | "expiresAt">,
-): Session {
+type SessionData = Pick<
+  Session,
+  | "domain"
+  | "memberId"
+  | "accessToken"
+  | "refreshToken"
+  | "tokenExpiresAt"
+  | "userId"
+>;
+const sameUser = (session: Session, data: SessionData) =>
+  data.userId !== undefined &&
+  session.userId === data.userId &&
+  session.domain === data.domain &&
+  session.memberId === data.memberId &&
+  session.expiresAt > Date.now();
+/**
+ * Cada abertura do app no Bitrix24 (menu ou aba do card) envia um POST novo.
+ * Quando o cookie já aponta para uma sessão válida do mesmo usuário e portal,
+ * só os tokens são trocados: os caches (catálogo, nomes, amostra da autópsia)
+ * continuam valendo e o limite de sessões não é consumido a cada clique.
+ */
+export function openSession(
+  data: SessionData,
+  currentId?: string,
+): { session: Session; reused: boolean } {
+  const current = currentId ? sessions.get(currentId) : undefined;
+  if (current && sameUser(current, data)) {
+    current.accessToken = data.accessToken;
+    current.refreshToken = data.refreshToken;
+    current.tokenExpiresAt = data.tokenExpiresAt;
+    current.expiresAt = Date.now() + 8 * 3600000;
+    return { session: current, reused: true };
+  }
+  return { session: createSession(data), reused: false };
+}
+export function createSession(data: SessionData): Session {
   for (const [id, session] of sessions)
     if (session.expiresAt <= Date.now()) sessions.delete(id);
   if (sessions.size >= 1000)
@@ -52,13 +92,29 @@ export function createSession(
       "Limite de sessões temporárias atingido. Tente novamente mais tarde.",
       503,
     );
-  const session = {
+  // Outra sessão viva do mesmo usuário (ex.: outro navegador) cede os caches.
+  let donor: Session | undefined;
+  for (const candidate of sessions.values())
+    if (sameUser(candidate, data)) donor = candidate;
+  const session: Session = {
     ...data,
     id: randomBytes(32).toString("hex"),
     expiresAt: Date.now() + 8 * 3600000,
+    ...(donor && {
+      catalog: donor.catalog,
+      userNames: donor.userNames,
+      closedSample: donor.closedSample,
+    }),
   };
   sessions.set(session.id, session);
   return session;
+}
+export function sessionIdFromCookieHeader(header: string | null) {
+  for (const part of (header || "").split(";")) {
+    const [name, ...value] = part.trim().split("=");
+    if (name === SESSION_COOKIE) return value.join("=") || undefined;
+  }
+  return undefined;
 }
 export async function getSession() {
   const id = (await cookies()).get(SESSION_COOKIE)?.value;

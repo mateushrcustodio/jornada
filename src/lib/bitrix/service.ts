@@ -18,7 +18,15 @@ import {
 import { demoDataset } from "../demo";
 import { isDemo } from "./config";
 import { getSession, type Session } from "./session";
-import { batch, listAll, listPage, rest, unwrap } from "./client";
+import {
+  batch,
+  batchWithMeta,
+  listAll,
+  listAllBatched,
+  listPage,
+  rest,
+  unwrap,
+} from "./client";
 import { BitrixError } from "./errors";
 
 export async function getCatalog(providedSession?: Session): Promise<Catalog> {
@@ -26,6 +34,16 @@ export async function getCatalog(providedSession?: Session): Promise<Catalog> {
   const session = providedSession ?? (await getSession());
   if (session.catalog && session.catalog.expiresAt > Date.now())
     return session.catalog.data;
+  // Painel, card e o aquecimento do placement podem pedir o catálogo ao mesmo
+  // tempo; todos aguardam a mesma consulta em vez de repeti-la.
+  if (session.catalogPending) return session.catalogPending;
+  const pending = loadCatalog(session).finally(() => {
+    if (session.catalogPending === pending) session.catalogPending = undefined;
+  });
+  session.catalogPending = pending;
+  return pending;
+}
+async function loadCatalog(session: Session): Promise<Catalog> {
   const pipelines = await listAll<RawCategory>(
     session,
     "crm.category.list",
@@ -155,23 +173,30 @@ async function resolveHistoryActors(
   const names = (session.userNames ??= new Map<number, string>());
   const pendingIds = ids.filter((id) => !names.has(id));
   try {
-    for (let index = 0; index < pendingIds.length; index += 50) {
-      const responses = await batch(
-        session,
-        pendingIds.slice(index, index + 50).map((id) => ({
-          method: "user.get",
-          query: { FILTER: { ID: id } },
-          as: `user_${id}`,
-        })),
-      );
+    const groups: number[][] = [];
+    for (let index = 0; index < pendingIds.length; index += 50)
+      groups.push(pendingIds.slice(index, index + 50));
+    const answers = await Promise.all(
+      groups.map((group) =>
+        batch(
+          session,
+          group.map((id) => ({
+            method: "user.get",
+            query: { FILTER: { ID: id } },
+            as: `user_${id}`,
+          })),
+        ),
+      ),
+    );
+    answers.forEach((responses, groupIndex) =>
       responses.forEach((response, responseIndex) => {
-        const id = pendingIds[index + responseIndex];
+        const id = groups[groupIndex][responseIndex];
         const user = unwrapBatch<RawUser>(response)[0];
         if (!user) return;
         const name = userDisplayName(user);
         if (name) names.set(id, name);
-      });
-    }
+      }),
+    );
   } catch {
     // A falha de permissão em user.get não deve impedir a leitura do histórico.
   }
@@ -239,29 +264,34 @@ async function listByIdPages<T>(
   return result;
 }
 
+/** Histórico de cada negócio em um lote; falha se o portal não aceitar o formato. */
+async function readHistoryBatch(session: Session, ids: number[]) {
+  if (!ids.length) return [] as HistoryEntry[];
+  const responses = await batch(
+    session,
+    ids.map((id) => ({
+      method: "crm.stagehistory.list",
+      query: {
+        entityTypeId: 2,
+        filter: { OWNER_ID: id },
+        select: historySelect,
+        order: { CREATED_TIME: "ASC", ID: "ASC" },
+      },
+      as: `history_owner_${id}`,
+    })),
+  );
+  const result = responses.flatMap((response) =>
+    normalizeHistory(unwrapBatch<HistoryEntry>(response)),
+  );
+  if (result.length) return result;
+  // Um lote vazio para muitos proprietários pode indicar que o portal não
+  // interpretou o filtro escalar; o chamador usa as formas compatíveis.
+  throw new BitrixError("EMPTY_HISTORY_BATCH", "Lote de histórico vazio");
+}
 async function readHistoryForOwners(session: Session, ids: number[]) {
   if (!ids.length) return [] as HistoryEntry[];
   try {
-    const responses = await batch(
-      session,
-      ids.map((id) => ({
-        method: "crm.stagehistory.list",
-        query: {
-          entityTypeId: 2,
-          filter: { OWNER_ID: id },
-          select: historySelect,
-          order: { CREATED_TIME: "ASC", ID: "ASC" },
-        },
-        as: `history_owner_${id}`,
-      })),
-    );
-    const result = responses.flatMap((response) =>
-      normalizeHistory(unwrapBatch<HistoryEntry>(response)),
-    );
-    if (result.length) return result;
-    // Um lote vazio para muitos proprietários pode indicar que o portal não
-    // interpretou o filtro escalar; abaixo usamos as formas compatíveis.
-    throw new BitrixError("EMPTY_HISTORY_BATCH", "Lote de histórico vazio");
+    return await readHistoryBatch(session, ids);
   } catch {
     // Alguns portais aceitam apenas OWNER_ID escalar dentro de subrequests.
     // Tentamos primeiro o filtro em lote tradicional para manter compatibilidade
@@ -291,6 +321,201 @@ async function readHistoryForOwners(session: Session, ids: number[]) {
     return result;
   }
 }
+/** Executa `fn` sobre os itens com no máximo `limit` chamadas simultâneas, mantendo a ordem. */
+async function mapLimit<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>,
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let cursor = 0;
+  async function worker() {
+    while (cursor < items.length) {
+      const index = cursor++;
+      results[index] = await fn(items[index]);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(limit, items.length) }, worker),
+  );
+  return results;
+}
+const HISTORY_LIMIT = 10000;
+async function readRecentHistory(
+  session: Session,
+  historyFilter: Record<string, unknown>,
+): Promise<{ rows: HistoryEntry[]; total: number; truncated: boolean }> {
+  try {
+    // Mais recentes primeiro: se o período passar do limite, ficam as
+    // movimentações novas, e o painel avisa que a leitura é parcial.
+    const { items, total } = await listAllBatched<HistoryEntry>(
+      session,
+      "crm.stagehistory.list",
+      {
+        entityTypeId: 2,
+        filter: historyFilter,
+        select: historySelect,
+        order: { ID: "DESC" },
+      },
+      { limit: HISTORY_LIMIT, overflow: "truncate", idField: "ID" },
+    );
+    return {
+      rows: normalizeHistory(items),
+      total,
+      truncated: total > items.length,
+    };
+  } catch {
+    // Caminho anterior, mais lento, para portais que não aceitam o lote.
+    let rows: HistoryEntry[];
+    try {
+      rows = normalizeHistory(
+        await listByIdPages<HistoryEntry>(
+          session,
+          "crm.stagehistory.list",
+          { entityTypeId: 2, filter: historyFilter, select: historySelect },
+          "ID",
+        ),
+      );
+    } catch {
+      rows = normalizeHistory(
+        await listAll<HistoryEntry>(session, "crm.stagehistory.list", {
+          entityTypeId: 2,
+          filter: historyFilter,
+          select: historySelect,
+          order: { CREATED_TIME: "DESC", ID: "DESC" },
+        }),
+      );
+    }
+    return { rows, total: rows.length, truncated: false };
+  }
+}
+async function readActiveDeals(
+  session: Session,
+  activeFilter: Record<string, unknown>,
+): Promise<{ active: Deal[]; activeTotal: number; totalKnown: boolean }> {
+  // Sem filtro de data aqui: negócios sem movimentação no período também podem estar parados.
+  // A visão geral não deve baixar milhares de cards de uma vez: lê até 500 e
+  // usa o total informado pelo portal para avisar quando há mais.
+  try {
+    const { items, total } = await listAllBatched<Deal>(
+      session,
+      "crm.item.list",
+      {
+        entityTypeId: 2,
+        filter: activeFilter,
+        select: dealSelect,
+        order: { id: "ASC" },
+      },
+      { limit: 500, overflow: "truncate", idField: "id" },
+    );
+    return { active: normalizeDeals(items), activeTotal: total, totalKnown: true };
+  } catch {
+    /* Segue para o caminho anterior. */
+  }
+  try {
+    const rows = await listByIdPages<Deal>(
+      session,
+      "crm.item.list",
+      { entityTypeId: 2, filter: activeFilter, select: dealSelect },
+      "id",
+      "items",
+      500,
+    );
+    const active = normalizeDeals(rows);
+    return { active, activeTotal: active.length, totalKnown: false };
+  } catch (error) {
+    try {
+      const rows = await listAll<Deal>(
+        session,
+        "crm.item.list",
+        { entityTypeId: 2, filter: activeFilter, select: dealSelect },
+        "items",
+        500,
+      );
+      const active = normalizeDeals(rows);
+      return { active, activeTotal: active.length, totalKnown: true };
+    } catch (fallbackError) {
+      if (
+        !(fallbackError instanceof BitrixError) ||
+        fallbackError.code !== "QUERY_TOO_LARGE"
+      )
+        throw error;
+      const activePage = await listPage<Deal>(
+        session,
+        "crm.item.list",
+        { entityTypeId: 2, filter: activeFilter, select: dealSelect },
+        "items",
+        -1,
+      );
+      const active = normalizeDeals(activePage.items.slice(0, 500));
+      const total = Number(activePage.total);
+      return {
+        active,
+        activeTotal: Number.isFinite(total) ? total : active.length,
+        totalKnown: Number.isFinite(total),
+      };
+    }
+  }
+}
+async function readDealChunk(session: Session, chunkIds: number[]) {
+  try {
+    // Um lote só: a lista dos negócios do grupo (respeita as permissões) e o
+    // histórico de cada um. Só o lote aqui: as formas de compatibilidade
+    // ficam no caminho abaixo, que consulta apenas os negócios legíveis.
+    const responses = await batch(session, [
+      {
+        method: "crm.item.list",
+        query: {
+          entityTypeId: 2,
+          filter: { "@id": chunkIds },
+          select: dealSelect,
+        },
+        as: "deals",
+      },
+      ...chunkIds.map((id) => ({
+        method: "crm.stagehistory.list",
+        query: {
+          entityTypeId: 2,
+          filter: { OWNER_ID: id },
+          select: historySelect,
+          order: { CREATED_TIME: "ASC", ID: "ASC" },
+        },
+        as: `history_owner_${id}`,
+      })),
+    ]);
+    const deals = normalizeDeals(unwrapBatch<Deal>(responses[0]));
+    const history = responses
+      .slice(1)
+      .flatMap((response) =>
+        normalizeHistory(unwrapBatch<HistoryEntry>(response)),
+      );
+    if (deals.length && !history.length)
+      throw new BitrixError("EMPTY_HISTORY_BATCH", "Lote de histórico vazio");
+    const readable = new Set(deals.map((deal) => deal.id));
+    return {
+      deals,
+      history: history.filter((entry) => readable.has(entry.OWNER_ID)),
+    };
+  } catch {
+    // Mantém uma rota de compatibilidade para portais que ainda não
+    // disponibilizam subrequests ou para respostas antigas do REST.
+    // O lote é uma otimização; se ele falhar, a consulta sequencial continua
+    // sendo a fonte de verdade para não bloquear o painel.
+    const readable = normalizeDeals(
+      await listAll<Deal>(session, "crm.item.list", {
+        entityTypeId: 2,
+        filter: { "@id": chunkIds },
+        select: dealSelect,
+      }),
+    );
+    return {
+      deals: readable,
+      history: readable.length
+        ? await readHistoryForOwners(session, readable.map((d) => d.id))
+        : [],
+    };
+  }
+}
 export async function getDashboard(filters: Filters, settings: Settings) {
   const now = Date.now();
   if (isDemo()) {
@@ -306,7 +531,6 @@ export async function getDashboard(filters: Filters, settings: Settings) {
     );
   }
   const session = await getSession();
-  const catalog = await getCatalog(session);
   const pipelineFilter =
     filters.pipeline !== undefined
       ? filters.pipeline
@@ -324,26 +548,13 @@ export async function getDashboard(filters: Filters, settings: Settings) {
   if (filters.stage) {
     activeFilter.stageId = filters.stage;
   }
-  let recentRows: HistoryEntry[];
-  try {
-    recentRows = normalizeHistory(
-      await listByIdPages<HistoryEntry>(
-        session,
-        "crm.stagehistory.list",
-        { entityTypeId: 2, filter: historyFilter, select: historySelect },
-        "ID",
-      ),
-    );
-  } catch {
-    recentRows = normalizeHistory(
-      await listAll<HistoryEntry>(session, "crm.stagehistory.list", {
-        entityTypeId: 2,
-        filter: historyFilter,
-        select: historySelect,
-        order: { CREATED_TIME: "DESC", ID: "DESC" },
-      }),
-    );
-  }
+  // As três leituras são independentes e saem juntas.
+  const [catalog, recentResult, activeResult] = await Promise.all([
+    getCatalog(session),
+    readRecentHistory(session, historyFilter),
+    readActiveDeals(session, activeFilter),
+  ]);
+  const recentRows = recentResult.rows;
   // Alguns portais não aplicam CATEGORY_ID/STAGE_ID de forma consistente no
   // histórico. O período é filtrado no REST e o recorte de pipeline/etapa é
   // aplicado localmente, preservando as movimentações reais.
@@ -352,106 +563,37 @@ export async function getDashboard(filters: Filters, settings: Settings) {
       (filters.pipeline === undefined || entry.CATEGORY_ID === filters.pipeline) &&
       (!filters.stage || entry.STAGE_ID === filters.stage),
   );
-  // Sem filtro de data aqui: negócios sem movimentação no período também podem estar parados.
-  // A visão geral não deve baixar milhares de cards de uma vez. Usamos a
-  // primeira página para calcular os indicadores e informamos ao usuário
-  // quando o portal possui mais cards do que o recorte consultado.
-  let active: Deal[];
-  let activeTotal: number;
-  try {
-    const rows = await listByIdPages<Deal>(
-      session,
-      "crm.item.list",
-      { entityTypeId: 2, filter: activeFilter, select: dealSelect },
-      "id",
-      "items",
-      500,
-    );
-    active = normalizeDeals(rows);
-    activeTotal = active.length;
-  } catch (error) {
-    try {
-      const rows = await listAll<Deal>(
-        session,
-        "crm.item.list",
-        { entityTypeId: 2, filter: activeFilter, select: dealSelect },
-        "items",
-        500,
-      );
-      active = normalizeDeals(rows);
-      activeTotal = active.length;
-    } catch (fallbackError) {
-      if (
-        !(fallbackError instanceof BitrixError) ||
-        fallbackError.code !== "QUERY_TOO_LARGE"
-      )
-        throw error;
-      const activePage = await listPage<Deal>(
-        session,
-        "crm.item.list",
-        { entityTypeId: 2, filter: activeFilter, select: dealSelect },
-        "items",
-        -1,
-      );
-      active = normalizeDeals(activePage.items.slice(0, 500));
-      activeTotal = Number.isFinite(Number(activePage.total))
-        ? Number(activePage.total)
-        : active.length;
-    }
-  }
+  const { active, activeTotal, totalKnown } = activeResult;
   const ids = [
     ...new Set([...recent.map((h) => h.OWNER_ID), ...active.map((d) => d.id)]),
   ];
   const queryLimit = 500;
   const limitedIds = ids.slice(0, queryLimit);
   const partial =
-    ids.length > queryLimit || activeTotal > active.length || active.length >= 500;
+    ids.length > queryLimit ||
+    activeTotal > active.length ||
+    (!totalKnown && active.length >= 500) ||
+    recentResult.truncated;
+  const chunks: number[][] = [];
+  // 49 negócios por grupo: 1 lista + 49 históricos = 50 subcomandos por lote.
+  for (let i = 0; i < limitedIds.length; i += 49)
+    chunks.push(limitedIds.slice(i, i + 49));
   const deals: Deal[] = [];
   const history: HistoryEntry[] = [];
-  for (let i = 0; i < limitedIds.length; i += 50) {
-    const chunkIds = limitedIds.slice(i, i + 50);
-    let readable: Deal[];
-    let chunkHistory: HistoryEntry[];
-    try {
-      // O batch reduz duas chamadas REST sequenciais a uma ida ao Bitrix24.
-      const responses = await batch(session, [
-        {
-          method: "crm.item.list",
-          query: {
-            entityTypeId: 2,
-            filter: { "@id": chunkIds },
-            select: dealSelect,
-          },
-          as: `deals_${i}`,
-        },
-      ]);
-      readable = normalizeDeals(unwrapBatch<Deal>(responses[0]));
-      chunkHistory = await readHistoryForOwners(session, chunkIds);
-    } catch {
-      // Mantém uma rota de compatibilidade para portais que ainda não
-      // disponibilizam subrequests ou para respostas antigas do REST.
-      // O lote é uma otimização; se ele falhar, a consulta sequencial continua
-      // sendo a fonte de verdade para não bloquear o painel.
-      readable = normalizeDeals(
-        await listAll<Deal>(session, "crm.item.list", {
-          entityTypeId: 2,
-          filter: { "@id": chunkIds },
-          select: dealSelect,
-        }),
-      );
-      chunkHistory = readable.length
-        ? await readHistoryForOwners(session, readable.map((d) => d.id))
-        : [];
-    }
-    deals.push(...readable);
-    history.push(...chunkHistory);
-    if (history.length > 10000)
-      throw new BitrixError(
-        "QUERY_TOO_LARGE",
-        "Histórico muito extenso para este MVP. Selecione um pipeline ou reduza o período.",
-        422,
-      );
+  // Até 6 grupos ao mesmo tempo; o limitador do portal segura o ritmo se o
+  // balde encher.
+  for (const result of await mapLimit(chunks, 6, (chunk) =>
+    readDealChunk(session, chunk),
+  )) {
+    deals.push(...result.deals);
+    history.push(...result.history);
   }
+  if (history.length > 10000)
+    throw new BitrixError(
+      "QUERY_TOO_LARGE",
+      "Histórico muito extenso para este MVP. Selecione um pipeline ou reduza o período.",
+      422,
+    );
   const resolvedHistory = await resolveHistoryActors(session, history, deals);
   const result = buildDashboard(
     deals,
@@ -468,7 +610,9 @@ export async function getDashboard(filters: Filters, settings: Settings) {
     activeCount: activeTotal,
     partial,
     warning: partial
-      ? `A consulta analisou ${limitedIds.length} negócios nesta atualização. O portal possui ${activeTotal} negócios em andamento; selecione um pipeline ou reduza o período para detalhar todos.`
+      ? recentResult.truncated
+        ? `O período tem ${recentResult.total} movimentações; esta atualização analisou as ${recentRows.length} mais recentes e ${limitedIds.length} negócios. Selecione um pipeline ou reduza o período para detalhar todos.`
+        : `A consulta analisou ${limitedIds.length} negócios nesta atualização. O portal possui ${activeTotal} negócios em andamento; selecione um pipeline ou reduza o período para detalhar todos.`
       : undefined,
   };
 }
@@ -485,6 +629,80 @@ export async function getJourney(id: number) {
     return buildJourney(deal, history, catalog, Date.now(), true);
   }
   const session = await getSession();
+  const { deal, rows } = await readDealWithHistory(session, id);
+  // Negócio fechado: a amostra da autópsia começa a ser lida agora, em
+  // paralelo, e /benchmark só aguarda o resultado.
+  if (isClosed(deal)) closedSample(session, deal).catch(() => undefined);
+  const [catalog, history] = await Promise.all([
+    getCatalog(session),
+    resolveHistoryActors(session, rows, [deal]),
+  ]);
+  return buildJourney(
+    deal,
+    history,
+    catalog,
+    Date.now(),
+    false,
+    session.domain,
+  );
+}
+function batchItem(value: unknown): Deal | undefined {
+  let current = value;
+  for (let depth = 0; depth < 3 && current && typeof current === "object"; depth += 1) {
+    if ("item" in current) {
+      const item = (current as { item: unknown }).item;
+      return item && typeof item === "object" ? (item as Deal) : undefined;
+    }
+    if (!("result" in current)) break;
+    current = (current as { result: unknown }).result;
+  }
+  return undefined;
+}
+const journeyHistoryQuery = (id: number) => ({
+  entityTypeId: 2,
+  filter: { OWNER_ID: id },
+  order: { CREATED_TIME: "ASC", ID: "ASC" },
+  select: historySelect,
+});
+/**
+ * Lê o negócio e o histórico numa única ida ao Bitrix24. Com halt=1 o
+ * histórico só é executado se crm.item.get passou, mantendo a regra de
+ * confirmar o acesso ao negócio antes de ler o histórico.
+ */
+async function readDealWithHistory(session: Session, id: number) {
+  try {
+    const response = await batchWithMeta(
+      session,
+      [
+        { method: "crm.item.get", query: { entityTypeId: 2, id }, as: "deal" },
+        {
+          method: "crm.stagehistory.list",
+          query: journeyHistoryQuery(id),
+          as: "history",
+        },
+      ],
+      { halt: true },
+    );
+    const raw = batchItem(response.results[0]);
+    if (raw) {
+      const deal = normalizeDeals([raw])[0];
+      const more = response.next.history;
+      const rows =
+        more === undefined || more === null || more === ""
+          ? normalizeHistory(unwrapBatch<HistoryEntry>(response.results[1]))
+          : // Mais de 50 movimentações: lê o histórico completo.
+            normalizeHistory(
+              await listAll<HistoryEntry>(
+                session,
+                "crm.stagehistory.list",
+                journeyHistoryQuery(id),
+              ),
+            );
+      if (deal.id === id) return { deal, rows };
+    }
+  } catch {
+    /* Abaixo, a leitura em duas etapas devolve o erro adequado (acesso, 404). */
+  }
   const item = await rest<{ item: Deal }>(session, "crm.item.get", {
     entityTypeId: 2,
     id,
@@ -495,28 +713,15 @@ export async function getJourney(id: number) {
       "Negócio não encontrado ou sem permissão de acesso.",
       404,
     );
-  const catalog = await getCatalog(session);
   const deal = normalizeDeals([item.result.item])[0];
-  const history = await resolveHistoryActors(
-    session,
-    normalizeHistory(
-    await listAll<HistoryEntry>(session, "crm.stagehistory.list", {
-      entityTypeId: 2,
-      filter: { OWNER_ID: id },
-      order: { CREATED_TIME: "ASC", ID: "ASC" },
-      select: historySelect,
-    }),
+  const rows = normalizeHistory(
+    await listAll<HistoryEntry>(
+      session,
+      "crm.stagehistory.list",
+      journeyHistoryQuery(id),
     ),
-    [deal],
   );
-  return buildJourney(
-    deal,
-    history,
-    catalog,
-    Date.now(),
-    false,
-    session.domain,
-  );
+  return { deal, rows };
 }
 
 // Quantos negócios fechados recentes entram na comparação da autópsia.
@@ -550,12 +755,25 @@ export async function getBenchmark(id: number): Promise<Benchmark | null> {
       : null;
   }
   const session = await getSession();
-  const deal = await readClosedDeal(session, id);
+  const [deal, catalog] = await Promise.all([
+    readClosedDeal(session, id),
+    getCatalog(session),
+  ]);
   if (!isClosed(deal)) return null;
-  const catalog = await getCatalog(session);
+  const sample = await closedSample(session, deal, now);
+  return buildBenchmark(deal, sample.deals, sample.history, catalog, now);
+}
+/**
+ * Amostra de fechados do mesmo funil e resultado, em cache na sessão por 10
+ * minutos. Consultas simultâneas (card e /benchmark) aguardam a mesma leitura.
+ */
+async function closedSample(session: Session, deal: Deal, now = Date.now()) {
   const key = `${deal.categoryId}:${deal.stageSemanticId}`;
-  let sample = session.closedSample;
-  if (!sample || sample.key !== key || sample.expiresAt <= now) {
+  const cached = session.closedSample;
+  if (cached && cached.key === key && cached.expiresAt > now) return cached;
+  const inFlight = session.closedSamplePending;
+  if (inFlight && inFlight.key === key) return inFlight.promise;
+  const promise = (async () => {
     // crm.item.list já respeita as permissões de leitura de quem consultou.
     const page = await rest<{ items: Deal[] }>(session, "crm.item.list", {
       entityTypeId: 2,
@@ -570,22 +788,20 @@ export async function getBenchmark(id: number): Promise<Benchmark | null> {
       0,
       SAMPLE_SIZE,
     );
-    const history: HistoryEntry[] = [];
-    for (let i = 0; i < deals.length; i += 50)
-      history.push(
-        ...normalizeHistory(
-          await listAll<HistoryEntry>(session, "crm.stagehistory.list", {
-            entityTypeId: 2,
-            filter: { OWNER_ID: deals.slice(i, i + 50).map((d) => d.id) },
-            select: historySelect,
-            order: { CREATED_TIME: "ASC", ID: "ASC" },
-          }),
-        ),
-      );
-    sample = { key, expiresAt: now + 10 * 60000, deals, history };
+    // Um lote com o histórico de cada negócio, em vez de páginas sequenciais.
+    const history = await readHistoryForOwners(
+      session,
+      deals.map((d) => d.id),
+    );
+    const sample = { key, expiresAt: Date.now() + 10 * 60000, deals, history };
     session.closedSample = sample;
-  }
-  return buildBenchmark(deal, sample.deals, sample.history, catalog, now);
+    return sample;
+  })().finally(() => {
+    if (session.closedSamplePending?.promise === promise)
+      session.closedSamplePending = undefined;
+  });
+  session.closedSamplePending = { key, promise };
+  return promise;
 }
 // Única escrita do app no CRM: um comentário na timeline, sempre por ação
 // explícita do usuário e com o texto montado no servidor.

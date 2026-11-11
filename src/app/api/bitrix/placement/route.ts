@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { appUrl, isDemo, validateDomain } from "@/lib/bitrix/config";
-import { secretEqual, verifyApp } from "@/lib/bitrix/auth";
+import { identifyUser, secretEqual, verifyApp } from "@/lib/bitrix/auth";
 import {
-  createSession,
   cookieOptions,
+  openSession,
   SESSION_COOKIE,
+  sessionIdFromCookieHeader,
   type Session,
 } from "@/lib/bitrix/session";
+import { getCatalog } from "@/lib/bitrix/service";
 import { errorResponse } from "@/lib/http";
 import { BitrixError } from "@/lib/bitrix/errors";
 
@@ -103,12 +105,23 @@ export async function POST(request: Request) {
       refreshToken: input.REFRESH_ID,
       tokenExpiresAt: Date.now() + input.AUTH_EXPIRES * 1000,
     };
-    await verifyApp({
+    const pending = {
       ...data,
       id: "pending",
       expiresAt: Date.now() + 60000,
-    } as Session);
-    const session = createSession(data);
+    } as Session;
+    // As duas consultas saem juntas; o limitador do portal permite a rajada.
+    const [, userId] = await Promise.all([
+      verifyApp(pending),
+      identifyUser(pending),
+    ]);
+    const { session } = openSession(
+      { ...data, userId },
+      sessionIdFromCookieHeader(request.headers.get("cookie")),
+    );
+    // Adianta o catálogo (pipelines e etapas) enquanto o navegador segue o
+    // redirect e carrega a página; a próxima consulta reaproveita a promessa.
+    if (target !== "/install") getCatalog(session).catch(() => undefined);
     const destination = new URL(target, appUrl());
     // Apenas contexto público do SDK, nunca AUTH_ID, REFRESH_ID ou APPLICATION_TOKEN.
     if (target === "/install" && typeof params.APP_SID === "string") {

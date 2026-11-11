@@ -2,10 +2,10 @@ import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { appUrl, validateDomain } from "@/lib/bitrix/config";
 import { exchangeToken } from "@/lib/bitrix/client";
-import { secretEqual, verifyApp } from "@/lib/bitrix/auth";
+import { identifyUser, secretEqual, verifyApp } from "@/lib/bitrix/auth";
 import {
   cookieOptions,
-  createSession,
+  openSession,
   SESSION_COOKIE,
   type Session,
 } from "@/lib/bitrix/session";
@@ -52,12 +52,19 @@ export async function GET(request: Request) {
       refreshToken: token.refresh_token,
       tokenExpiresAt: Date.now() + Number(token.expires_in || 3600) * 1000,
     };
-    await verifyApp({
+    const pending = {
       ...data,
       id: "pending",
       expiresAt: Date.now() + 60000,
-    } as Session);
-    const session = createSession(data);
+    } as Session;
+    const [, userId] = await Promise.all([
+      verifyApp(pending),
+      identifyUser(pending),
+    ]);
+    const { session } = openSession(
+      { ...data, userId },
+      (await cookies()).get(SESSION_COOKIE)?.value,
+    );
     const response = NextResponse.redirect(
       new URL("/dashboard", appUrl()),
       303,

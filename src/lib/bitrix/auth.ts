@@ -28,3 +28,17 @@ export async function verifyApp(session: Session) {
       403,
     );
 }
+/**
+ * ID do usuário dono do token (método profile, escopo básico). Serve só para
+ * reaproveitar sessão e cache do mesmo usuário; se falhar, o app segue sem
+ * reaproveitar nada.
+ */
+export async function identifyUser(session: Session) {
+  try {
+    const profile = await rest<{ ID?: string | number }>(session, "profile");
+    const id = Number(profile.result?.ID);
+    return Number.isInteger(id) && id > 0 ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}

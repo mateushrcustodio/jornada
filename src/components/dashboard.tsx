@@ -52,16 +52,39 @@ const subtitles = {
   stages: "Onde o tempo se concentra no seu funil.",
 };
 
+// Filtros e consulta sobrevivem à troca de aba do painel (cada aba remonta
+// este componente). Depois de 5 minutos a consulta volta a ser buscada.
+const DASHBOARD_CACHE_MS = 5 * 60000;
+const sticky: Record<string, unknown> = {};
+function useSticky<T>(key: string, initial: () => T) {
+  const [value, setValue] = useState<T>(() =>
+    key in sticky ? (sticky[key] as T) : initial(),
+  );
+  function update(next: T) {
+    sticky[key] = next;
+    setValue(next);
+  }
+  return [value, update] as const;
+}
+
 export function Dashboard({ view }: { view: View }) {
   const { settings, ready, demo } = useApp();
-  const catalogResource = useResource<Catalog>("/api/catalog", undefined, ready);
+  const catalogResource = useResource<Catalog>(
+    "/api/catalog",
+    undefined,
+    ready,
+    DASHBOARD_CACHE_MS,
+  );
   const catalog = catalogResource.data;
-  const [requested, setRequested] = useState(() => demo);
-  const [period, setPeriod] = useState<Period>();
-  const [pipeline, setPipeline] = useState("");
-  const [stage, setStage] = useState("");
-  const [from, setFrom] = useState("");
-  const [to, setTo] = useState("");
+  const [requested, setRequested] = useSticky("requested", () => demo);
+  const [period, setPeriod] = useSticky<Period | undefined>(
+    "period",
+    () => undefined,
+  );
+  const [pipeline, setPipeline] = useSticky("pipeline", () => "");
+  const [stage, setStage] = useSticky("stage", () => "");
+  const [from, setFrom] = useSticky("from", () => "");
+  const [to, setTo] = useSticky("to", () => "");
   const effectivePeriod = period ?? settings.defaultPeriod;
   const validCustom =
     effectivePeriod !== "custom" ||
@@ -70,7 +93,15 @@ export function Dashboard({ view }: { view: View }) {
       from <= to &&
       Date.parse(to) - Date.parse(from) <= 365 * 86400000);
   // Uma faixa estável por seleção; o relógio é atualizado no clique em Atualizar.
-  const [clock, setClock] = useState(() => Date.now());
+  const [clock, setClockState] = useState(() => {
+    const saved = sticky.clock as number | undefined;
+    const now = Date.now();
+    return saved && now - saved < DASHBOARD_CACHE_MS ? saved : now;
+  });
+  function setClock(value: number) {
+    sticky.clock = value;
+    setClockState(value);
+  }
   const range = validCustom
     ? periodRange(effectivePeriod, new Date(clock), from, to)
     : undefined;
@@ -86,6 +117,7 @@ export function Dashboard({ view }: { view: View }) {
     "/api/dashboard",
     body,
     ready && validCustom && requested,
+    DASHBOARD_CACHE_MS,
   );
   const data = resource.data;
   function refresh() {
