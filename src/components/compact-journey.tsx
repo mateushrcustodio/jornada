@@ -1,5 +1,6 @@
 "use client";
-import { ArrowUpRight, Clock3, RefreshCw } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, Clock3, RefreshCw } from "lucide-react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import type { JourneyData, Stage } from "@/lib/types";
 import { dateTime, duration } from "@/lib/format";
@@ -31,8 +32,27 @@ export function CompactJourney({
   const { data, loading, error, code, refresh } = useResource<JourneyData>(
     `/api/deal/${id}`,
   );
-  if (loading) return <Skeleton journey />;
-  if (error) return <ErrorState message={error} code={code} retry={refresh} />;
+  // Aberto pelo painel não há menu ao redor; este botão leva de volta ao painel principal.
+  const back = fromDashboard ? (
+    <Link href="/dashboard" className="back-link">
+      <ArrowLeft size={16} />
+      Voltar ao painel
+    </Link>
+  ) : null;
+  if (loading)
+    return (
+      <>
+        {back}
+        <Skeleton journey />
+      </>
+    );
+  if (error)
+    return (
+      <>
+        {back}
+        <ErrorState message={error} code={code} retry={refresh} />
+      </>
+    );
   if (!data) return null;
   const currentStage = resolveStage(data, {
     CATEGORY_ID: data.deal.categoryId,
@@ -46,6 +66,7 @@ export function CompactJourney({
   const future = closed ? [] : futureStages(data, currentStage);
   return (
     <div className="journey">
+      {back}
       <div className="journey-heading">
         <div>
           <h1>{data.deal.title}</h1>

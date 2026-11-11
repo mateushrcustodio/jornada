@@ -264,3 +264,26 @@ test("autópsia aparece só em negócio fechado, com desvios e publicação", as
   await expect(panel.locator(".outcome.lost")).toBeVisible();
   await expect(panel.getByText("Etapas puladas")).toBeVisible();
 });
+test("card aberto pelo painel tem botão para voltar ao painel", async ({
+  page,
+}) => {
+  await page.goto("/dashboard/stalled");
+  await page.locator('a[href*="/journey?source=dashboard"]').first().click();
+  await expect(page).toHaveURL(/\/deal\/\d+\/journey\?source=dashboard/);
+  const back = page.getByRole("link", { name: "Voltar ao painel" });
+  await expect(back).toBeVisible();
+  await back.click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole("link", { name: "Visão geral" })).toBeVisible();
+});
+test("card aberto dentro do Bitrix24 não mostra o botão de voltar", async ({
+  page,
+}) => {
+  await page.goto("/deal/8061/journey");
+  await expect(
+    page.getByRole("heading", { name: "Acme · Expansão comercial" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Voltar ao painel" }),
+  ).toHaveCount(0);
+});

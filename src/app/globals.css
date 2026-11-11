@@ -305,6 +305,26 @@ main:focus {
 .text-button:hover {
   color: var(--blue-deep);
 }
+.back-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: fit-content;
+  min-height: 32px;
+  margin-bottom: 14px;
+  padding: 0 10px 0 6px;
+  border-radius: 8px;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+.back-link:hover {
+  background: var(--soft);
+  color: var(--ink);
+}
+.journey > .back-link {
+  margin-bottom: 0;
+}
 .spin {
   animation: spin 0.9s linear infinite;
 }
