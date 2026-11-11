@@ -168,6 +168,7 @@ export function Dashboard({ view }: { view: View }) {
           <select
             aria-label="Etapa"
             value={stage}
+            disabled={!pipeline}
             onChange={(e) => setStage(e.target.value)}
           >
             <option value="">Todas as etapas</option>
@@ -397,7 +398,7 @@ function TrackedDeals({ data }: { data: DashboardData }) {
         <div className="tracked-deals-list">
           {rows.map((row) => (
             <Link
-              href={`/deal/${row.deal.id}/journey`}
+              href={`/deal/${row.deal.id}/journey?source=dashboard`}
               className="tracked-deal-row"
               key={row.deal.id}
             >
@@ -575,7 +576,7 @@ function Movements({
             <div className="movement-row" key={row.entry.ID}>
               <div className="row-main">
                 <strong>
-                  <Link href={`/deal/${row.deal.id}/journey`}>
+                  <Link href={`/deal/${row.deal.id}/journey?source=dashboard`}>
                     {row.deal.title}
                   </Link>
                 </strong>
@@ -714,7 +715,7 @@ function Stalled({
                 >
                   <div className="stalled-item-top">
                     <div>
-                      <Link href={`/deal/${row.deal.id}/journey`}>
+                      <Link href={`/deal/${row.deal.id}/journey?source=dashboard`}>
                         <strong>{row.deal.title}</strong>
                       </Link>
                       <span>
@@ -729,7 +730,7 @@ function Stalled({
                   <Link
                     className="icon-button"
                     aria-label={`Ver jornada do negócio ${row.deal.id}`}
-                    href={`/deal/${row.deal.id}/journey`}
+                    href={`/deal/${row.deal.id}/journey?source=dashboard`}
                   >
                     <ArrowUpRight size={16} />
                   </Link>

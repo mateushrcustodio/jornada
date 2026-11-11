@@ -157,8 +157,9 @@ export async function listPage<T>(
   method: string,
   params: Record<string, unknown>,
   key = "items",
+  start = 0,
 ) {
-  const page = await rest<unknown>(session, method, { ...params, start: 0 });
+  const page = await rest<unknown>(session, method, { ...params, start });
   return {
     items: unwrap<T>(page.result, key),
     next: page.next,

@@ -99,6 +99,7 @@ const historySelect = [
   "STAGE_ID",
   "STAGE_SEMANTIC_ID",
   "CREATED_TIME",
+  "MOVED_BY",
 ];
 const dealSelect = [
   "id",
@@ -115,6 +116,81 @@ function normalizeHistory(rows: HistoryEntry[]): HistoryEntry[] {
     ID: Number(r.ID),
     OWNER_ID: Number(r.OWNER_ID),
     CATEGORY_ID: Number(r.CATEGORY_ID),
+    MOVED_BY:
+      r.MOVED_BY === undefined || r.MOVED_BY === null
+        ? undefined
+        : Number(r.MOVED_BY),
+  }));
+}
+
+type RawUser = {
+  ID: string | number;
+  NAME?: string;
+  LAST_NAME?: string;
+  SECOND_NAME?: string;
+};
+
+function userDisplayName(user: RawUser) {
+  return [user.NAME, user.SECOND_NAME, user.LAST_NAME]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(" ");
+}
+
+async function resolveHistoryActors(
+  session: Session,
+  rows: HistoryEntry[],
+  fallbackDeals: Deal[] = [],
+): Promise<HistoryEntry[]> {
+  const ids = [
+    ...new Set(
+      [
+        ...rows.map((row) => Number(row.MOVED_BY)),
+        ...fallbackDeals.map((deal) => Number(deal.movedBy)),
+      ]
+        .filter((id) => Number.isFinite(id) && id > 0),
+    ),
+  ];
+  if (!ids.length) return rows;
+  const names = (session.userNames ??= new Map<number, string>());
+  const pendingIds = ids.filter((id) => !names.has(id));
+  try {
+    for (let index = 0; index < pendingIds.length; index += 50) {
+      const responses = await batch(
+        session,
+        pendingIds.slice(index, index + 50).map((id) => ({
+          method: "user.get",
+          query: { FILTER: { ID: id } },
+          as: `user_${id}`,
+        })),
+      );
+      responses.forEach((response, responseIndex) => {
+        const id = pendingIds[index + responseIndex];
+        const user = unwrapBatch<RawUser>(response)[0];
+        if (!user) return;
+        const name = userDisplayName(user);
+        if (name) names.set(id, name);
+      });
+    }
+  } catch {
+    // A falha de permissão em user.get não deve impedir a leitura do histórico.
+  }
+  return rows.map((row) => ({
+    ...row,
+    MOVED_BY_NAME:
+      row.MOVED_BY_NAME ||
+      (row.MOVED_BY && names.get(Number(row.MOVED_BY))) ||
+      (() => {
+        const deal = fallbackDeals.find(
+          (candidate) =>
+            candidate.id === row.OWNER_ID &&
+            candidate.movedBy &&
+            candidate.movedTime &&
+            Date.parse(candidate.movedTime) === Date.parse(row.CREATED_TIME),
+        );
+        return deal?.movedBy ? names.get(Number(deal.movedBy)) : undefined;
+      })() ||
+      row.MOVED_BY_NAME,
   }));
 }
 function normalizeDeals(rows: Deal[]): Deal[] {
@@ -128,6 +204,92 @@ function unwrapBatch<T>(value: unknown, key = "items"): T[] {
   if (value && typeof value === "object" && "result" in value)
     return unwrapBatch<T>((value as { result: unknown }).result, key);
   return unwrap<T>(value, key);
+}
+
+async function listByIdPages<T>(
+  session: Session,
+  method: string,
+  params: Record<string, unknown>,
+  idField: "id" | "ID",
+  key = "items",
+  limit = 10000,
+) {
+  const result: T[] = [];
+  let lastId = 0;
+  while (true) {
+    const filter = {
+      ...((params.filter as Record<string, unknown> | undefined) ?? {}),
+      ...(lastId ? { [`>${idField}`]: lastId } : {}),
+    };
+    const page = await rest<unknown>(session, method, {
+      ...params,
+      filter,
+      order: { [idField]: "ASC", ...((params.order as object) ?? {}) },
+      start: -1,
+    });
+    const items = unwrap<T>(page.result, key);
+    if (!items.length) break;
+    result.push(...items);
+    if (result.length >= limit) return result.slice(0, limit);
+    const nextId = Number((items.at(-1) as Record<string, unknown>)[idField]);
+    if (!Number.isFinite(nextId) || nextId <= lastId) break;
+    lastId = nextId;
+    if (items.length < 50) break;
+  }
+  return result;
+}
+
+async function readHistoryForOwners(session: Session, ids: number[]) {
+  if (!ids.length) return [] as HistoryEntry[];
+  try {
+    const responses = await batch(
+      session,
+      ids.map((id) => ({
+        method: "crm.stagehistory.list",
+        query: {
+          entityTypeId: 2,
+          filter: { OWNER_ID: id },
+          select: historySelect,
+          order: { CREATED_TIME: "ASC", ID: "ASC" },
+        },
+        as: `history_owner_${id}`,
+      })),
+    );
+    const result = responses.flatMap((response) =>
+      normalizeHistory(unwrapBatch<HistoryEntry>(response)),
+    );
+    if (result.length) return result;
+    // Um lote vazio para muitos proprietários pode indicar que o portal não
+    // interpretou o filtro escalar; abaixo usamos as formas compatíveis.
+    throw new BitrixError("EMPTY_HISTORY_BATCH", "Lote de histórico vazio");
+  } catch {
+    // Alguns portais aceitam apenas OWNER_ID escalar dentro de subrequests.
+    // Tentamos primeiro o filtro em lote tradicional para manter compatibilidade
+    // com portais e adaptadores que não oferecem o endpoint batch.
+    const combined = normalizeHistory(
+      await listAll<HistoryEntry>(session, "crm.stagehistory.list", {
+        entityTypeId: 2,
+        filter: { OWNER_ID: ids },
+        select: historySelect,
+        order: { CREATED_TIME: "ASC", ID: "ASC" },
+      }),
+    );
+    if (combined.length) return combined;
+    // A consulta individual mantém os históricos completos mesmo nesses casos.
+    const result: HistoryEntry[] = [];
+    for (const id of ids)
+      result.push(
+        ...normalizeHistory(
+          await listAll<HistoryEntry>(session, "crm.stagehistory.list", {
+            entityTypeId: 2,
+            filter: { OWNER_ID: id },
+            select: historySelect,
+            order: { CREATED_TIME: "ASC", ID: "ASC" },
+          }),
+        ),
+      );
+    return result;
+  }
 }
 export async function getDashboard(filters: Filters, settings: Settings) {
   const now = Date.now();
@@ -162,14 +324,26 @@ export async function getDashboard(filters: Filters, settings: Settings) {
   if (filters.stage) {
     activeFilter.stageId = filters.stage;
   }
-  const recentRows = normalizeHistory(
-    await listAll<HistoryEntry>(session, "crm.stagehistory.list", {
-      entityTypeId: 2,
-      filter: historyFilter,
-      select: historySelect,
-      order: { CREATED_TIME: "DESC", ID: "DESC" },
-    }),
-  );
+  let recentRows: HistoryEntry[];
+  try {
+    recentRows = normalizeHistory(
+      await listByIdPages<HistoryEntry>(
+        session,
+        "crm.stagehistory.list",
+        { entityTypeId: 2, filter: historyFilter, select: historySelect },
+        "ID",
+      ),
+    );
+  } catch {
+    recentRows = normalizeHistory(
+      await listAll<HistoryEntry>(session, "crm.stagehistory.list", {
+        entityTypeId: 2,
+        filter: historyFilter,
+        select: historySelect,
+        order: { CREATED_TIME: "DESC", ID: "DESC" },
+      }),
+    );
+  }
   // Alguns portais não aplicam CATEGORY_ID/STAGE_ID de forma consistente no
   // histórico. O período é filtrado no REST e o recorte de pipeline/etapa é
   // aplicado localmente, preservando as movimentações reais.
@@ -185,34 +359,53 @@ export async function getDashboard(filters: Filters, settings: Settings) {
   let active: Deal[];
   let activeTotal: number;
   try {
-    const rows = await listAll<Deal>(
+    const rows = await listByIdPages<Deal>(
       session,
       "crm.item.list",
       { entityTypeId: 2, filter: activeFilter, select: dealSelect },
+      "id",
       "items",
       500,
     );
     active = normalizeDeals(rows);
     activeTotal = active.length;
   } catch (error) {
-    if (!(error instanceof BitrixError) || error.code !== "QUERY_TOO_LARGE")
-      throw error;
-    const activePage = await listPage<Deal>(session, "crm.item.list", {
-      entityTypeId: 2,
-      filter: activeFilter,
-      select: dealSelect,
-    });
-    active = normalizeDeals(activePage.items.slice(0, 500));
-    activeTotal = Number.isFinite(Number(activePage.total))
-      ? Number(activePage.total)
-      : active.length;
+    try {
+      const rows = await listAll<Deal>(
+        session,
+        "crm.item.list",
+        { entityTypeId: 2, filter: activeFilter, select: dealSelect },
+        "items",
+        500,
+      );
+      active = normalizeDeals(rows);
+      activeTotal = active.length;
+    } catch (fallbackError) {
+      if (
+        !(fallbackError instanceof BitrixError) ||
+        fallbackError.code !== "QUERY_TOO_LARGE"
+      )
+        throw error;
+      const activePage = await listPage<Deal>(
+        session,
+        "crm.item.list",
+        { entityTypeId: 2, filter: activeFilter, select: dealSelect },
+        "items",
+        -1,
+      );
+      active = normalizeDeals(activePage.items.slice(0, 500));
+      activeTotal = Number.isFinite(Number(activePage.total))
+        ? Number(activePage.total)
+        : active.length;
+    }
   }
   const ids = [
     ...new Set([...recent.map((h) => h.OWNER_ID), ...active.map((d) => d.id)]),
   ];
   const queryLimit = 500;
   const limitedIds = ids.slice(0, queryLimit);
-  const partial = ids.length > queryLimit || activeTotal > active.length;
+  const partial =
+    ids.length > queryLimit || activeTotal > active.length || active.length >= 500;
   const deals: Deal[] = [];
   const history: HistoryEntry[] = [];
   for (let i = 0; i < limitedIds.length; i += 50) {
@@ -231,19 +424,9 @@ export async function getDashboard(filters: Filters, settings: Settings) {
           },
           as: `deals_${i}`,
         },
-        {
-          method: "crm.stagehistory.list",
-          query: {
-            entityTypeId: 2,
-            filter: { OWNER_ID: chunkIds },
-            select: historySelect,
-            order: { CREATED_TIME: "ASC", ID: "ASC" },
-          },
-          as: `history_${i}`,
-        },
       ]);
       readable = normalizeDeals(unwrapBatch<Deal>(responses[0]));
-      chunkHistory = normalizeHistory(unwrapBatch<HistoryEntry>(responses[1]));
+      chunkHistory = await readHistoryForOwners(session, chunkIds);
     } catch {
       // Mantém uma rota de compatibilidade para portais que ainda não
       // disponibilizam subrequests ou para respostas antigas do REST.
@@ -257,14 +440,7 @@ export async function getDashboard(filters: Filters, settings: Settings) {
         }),
       );
       chunkHistory = readable.length
-        ? normalizeHistory(
-            await listAll<HistoryEntry>(session, "crm.stagehistory.list", {
-              entityTypeId: 2,
-              filter: { OWNER_ID: readable.map((d) => d.id) },
-              select: historySelect,
-              order: { CREATED_TIME: "ASC", ID: "ASC" },
-            }),
-          )
+        ? await readHistoryForOwners(session, readable.map((d) => d.id))
         : [];
     }
     deals.push(...readable);
@@ -276,9 +452,10 @@ export async function getDashboard(filters: Filters, settings: Settings) {
         422,
       );
   }
+  const resolvedHistory = await resolveHistoryActors(session, history, deals);
   const result = buildDashboard(
     deals,
-    history,
+    resolvedHistory,
     catalog,
     filters,
     settings,
@@ -319,16 +496,21 @@ export async function getJourney(id: number) {
       404,
     );
   const catalog = await getCatalog(session);
-  const history = normalizeHistory(
+  const deal = normalizeDeals([item.result.item])[0];
+  const history = await resolveHistoryActors(
+    session,
+    normalizeHistory(
     await listAll<HistoryEntry>(session, "crm.stagehistory.list", {
       entityTypeId: 2,
       filter: { OWNER_ID: id },
       order: { CREATED_TIME: "ASC", ID: "ASC" },
       select: historySelect,
     }),
+    ),
+    [deal],
   );
   return buildJourney(
-    normalizeDeals([item.result.item])[0],
+    deal,
     history,
     catalog,
     Date.now(),

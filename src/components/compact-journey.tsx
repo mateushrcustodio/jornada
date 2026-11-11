@@ -1,5 +1,6 @@
 "use client";
 import { ArrowUpRight, Clock3, RefreshCw } from "lucide-react";
+import { useSearchParams } from "next/navigation";
 import type { JourneyData, Stage } from "@/lib/types";
 import { dateTime, duration } from "@/lib/format";
 import { isClosed, resolveStage } from "@/lib/calculations";
@@ -17,7 +18,16 @@ function futureStages(data: JourneyData, current: Stage) {
     .sort((a, b) => a.sort - b.sort);
 }
 
-export function CompactJourney({ id }: { id: number }) {
+export function CompactJourney({
+  id,
+  source = "card",
+}: {
+  id: number;
+  source?: "card" | "dashboard";
+}) {
+  const searchParams = useSearchParams();
+  const fromDashboard =
+    source === "dashboard" || searchParams.get("source") === "dashboard";
   const { data, loading, error, code, refresh } = useResource<JourneyData>(
     `/api/deal/${id}`,
   );
@@ -29,6 +39,9 @@ export function CompactJourney({ id }: { id: number }) {
     STAGE_ID: data.deal.stageId,
   });
   const closed = isClosed(data.deal);
+  const pipelineName = (categoryId: number) =>
+    data.pipelines.find((pipeline) => pipeline.id === categoryId)?.name ??
+    `Pipeline #${categoryId}`;
   const max = Math.max(1, ...data.visits.map((v) => v.duration));
   const future = closed ? [] : futureStages(data, currentStage);
   return (
@@ -38,18 +51,21 @@ export function CompactJourney({ id }: { id: number }) {
           <h1>{data.deal.title}</h1>
           <div className="journey-status">
             <StageBadge stage={currentStage} current />
+            <span className="pipeline-context">
+              {pipelineName(currentStage.categoryId)}
+            </span>
             <span>{closed ? "Jornada concluída" : "Etapa atual"}</span>
           </div>
         </div>
         <div className="heading-actions">
-          {data.url && (
+          {fromDashboard && data.url && (
             <a
               href={data.url}
               target="_blank"
               rel="noreferrer"
               className="text-link"
             >
-              Abrir no Bitrix24
+              Abrir card
               <ArrowUpRight size={14} />
             </a>
           )}
@@ -137,7 +153,12 @@ export function CompactJourney({ id }: { id: number }) {
                 />
                 <div className="timeline-card">
                   <div>
-                    <h3>{visit.stage.name}</h3>
+                    <h3>
+                      {visit.stage.name}
+                      <span className="timeline-pipeline">
+                        {pipelineName(visit.stage.categoryId)}
+                      </span>
+                    </h3>
                     <div className="timeline-meta">
                       <span>
                         <time dateTime={visit.entry.CREATED_TIME}>
@@ -147,7 +168,7 @@ export function CompactJourney({ id }: { id: number }) {
                       <span>
                         {visit.actor
                           ? `Movido por ${visit.actor}`
-                          : "Autoria não disponibilizada pelo Bitrix24"}
+                          : "Movimentação por automação"}
                       </span>
                     </div>
                   </div>
@@ -175,7 +196,12 @@ export function CompactJourney({ id }: { id: number }) {
               <li className="timeline-pending" key={`future-${stage.id}`}>
                 <span className="timeline-node" aria-hidden="true" />
                 <div className="timeline-card">
-                  <h3>{stage.name}</h3>
+                  <h3>
+                    {stage.name}
+                    <span className="timeline-pipeline">
+                      {pipelineName(stage.categoryId)}
+                    </span>
+                  </h3>
                   <span className="pending-label">Pendente</span>
                 </div>
               </li>

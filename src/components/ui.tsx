@@ -174,7 +174,7 @@ export function DealLink({
 }) {
   return (
     <div className="deal-link">
-      <Link href={`/deal/${id}/journey`}>
+      <Link href={`/deal/${id}/journey?source=dashboard`}>
         <strong>{title}</strong>
         <span>
           #{id}{" "}

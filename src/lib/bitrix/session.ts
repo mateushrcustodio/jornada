@@ -12,6 +12,7 @@ export interface Session {
   tokenExpiresAt: number;
   expiresAt: number;
   catalog?: { data: Catalog; expiresAt: number };
+  userNames?: Map<number, string>;
   // Amostra de negócios fechados usada na autópsia. Fica na sessão do usuário
   // porque a lista respeita as permissões de leitura de quem consultou.
   closedSample?: {

@@ -863,6 +863,10 @@ td {
   color: var(--muted);
   font-size: 12px;
 }
+.journey-status .pipeline-context {
+  color: var(--text);
+  font-weight: 600;
+}
 .track {
   display: flex;
   gap: 3px;
@@ -943,6 +947,13 @@ td {
 .timeline-card h3 {
   font-size: 14px;
   font-weight: 600;
+}
+.timeline-pipeline {
+  display: inline-block;
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
 }
 .timeline-meta {
   grid-column: 1;
