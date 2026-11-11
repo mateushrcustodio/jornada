@@ -138,9 +138,153 @@ export function unwrap<T>(result: unknown, key = "items"): T[] {
     Array.isArray((result as Record<string, unknown>)[key])
   )
     return (result as Record<string, unknown>)[key] as T[];
+  // Alguns portais envolvem o retorno com um nome próprio da versão da API.
+  // Quando houver exatamente uma coleção de itens, ela continua sendo segura
+  // para normalizar sem depender do nome do envelope.
+  if (result && typeof result === "object") {
+    const collections = Object.values(result as Record<string, unknown>).filter(
+      (value): value is T[] => Array.isArray(value),
+    );
+    if (collections.length === 1) return collections[0];
+  }
   throw new BitrixError(
     "INVALID_RESPONSE",
-    "O Bitrix24 retornou um formato de resposta inesperado.",
+    `O Bitrix24 retornou um formato de resposta inesperado (${describeBatchShape(result)}).`,
+  );
+}
+export async function listPage<T>(
+  session: Session,
+  method: string,
+  params: Record<string, unknown>,
+  key = "items",
+) {
+  const page = await rest<unknown>(session, method, { ...params, start: 0 });
+  return {
+    items: unwrap<T>(page.result, key),
+    next: page.next,
+    total: page.total,
+  };
+}
+export interface BatchRequest {
+  method: string;
+  query: Record<string, unknown>;
+  as?: string;
+}
+function describeBatchShape(value: unknown): string {
+  if (Array.isArray(value)) return `array(${value.length})`;
+  if (value && typeof value === "object") {
+    const keys = Object.keys(value as Record<string, unknown>).slice(0, 12);
+    return `object{${keys.join(",")}}`;
+  }
+  return typeof value;
+}
+function appendBatchParam(
+  entries: string[],
+  key: string,
+  value: unknown,
+): void {
+  if (Array.isArray(value)) {
+    value.forEach((item) => appendBatchParam(entries, `${key}[]`, item));
+    return;
+  }
+  if (value && typeof value === "object") {
+    Object.entries(value as Record<string, unknown>).forEach(([child, item]) =>
+      appendBatchParam(entries, `${key}[${child}]`, item),
+    );
+    return;
+  }
+  if (value !== undefined && value !== null)
+    entries.push(`${key}=${encodeURIComponent(String(value))}`);
+}
+function batchCommand(request: BatchRequest) {
+  const params: string[] = [];
+  Object.entries(request.query).forEach(([key, value]) =>
+    appendBatchParam(params, key, value),
+  );
+  return params.length
+    ? `${request.method}?${params.join("&")}`
+    : request.method;
+}
+export async function batch(session: Session, requests: BatchRequest[]) {
+  if (!requests.length) return [] as unknown[];
+  if (requests.length > 50)
+    throw new BitrixError(
+      "BATCH_SIZE",
+      "O lote de consultas excedeu o limite do Bitrix24.",
+      422,
+    );
+  const response = await rest<unknown>(session, "batch", {
+    halt: 0,
+    cmd: Object.fromEntries(
+      requests.map((request, index) => [
+        request.as || String(index),
+        batchCommand(request),
+      ]),
+    ),
+  });
+  let raw: unknown = response.result;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw) as unknown;
+    } catch {
+      /* O erro abaixo mantém a mensagem pública sem expor o payload. */
+    }
+  }
+  if (Array.isArray(raw)) return raw;
+  if (raw && typeof raw === "object") {
+    const errors = (raw as { result_error?: unknown }).result_error;
+    if (errors && typeof errors === "object" && Object.keys(errors).length) {
+      const first = Object.values(errors as Record<string, unknown>)[0];
+      const code =
+        first && typeof first === "object" && "error" in first
+          ? String((first as { error: unknown }).error)
+          : "BATCH_SUBREQUEST";
+      throw new BitrixError(
+        code,
+        "Uma das consultas em lote foi recusada pelo Bitrix24.",
+        502,
+      );
+    }
+  }
+  let container = raw;
+  for (let depth = 0; depth < 3; depth += 1) {
+    if (
+      !container ||
+      typeof container !== "object" ||
+      Array.isArray(container) ||
+      !("result" in container)
+    )
+      break;
+    const next = (container as { result: unknown }).result;
+    if (next === container) break;
+    container = next;
+  }
+  if (Array.isArray(container)) return container;
+  if (container && typeof container === "object") {
+    const map = container as Record<string, unknown>;
+    const ordered = requests.map((request, index) => {
+      const key = request.as || String(index);
+      return map[key] ?? map[String(index)] ?? map[index];
+    });
+    if (ordered.every((item) => item !== undefined)) return ordered;
+    const numericKeys = Object.keys(map)
+      .filter((key) => /^\d+$/.test(key))
+      .sort((a, b) => Number(a) - Number(b));
+    if (numericKeys.length >= requests.length)
+      return numericKeys
+        .slice(0, requests.length)
+        .map((key) => map[key]);
+    const values = Object.values(map);
+    if (values.length === requests.length) return values;
+  }
+  if (!raw)
+    throw new BitrixError(
+      "INVALID_RESPONSE",
+      `O Bitrix24 retornou um lote em formato inesperado (${describeBatchShape(raw)}).`,
+    );
+  throw new BitrixError(
+    "INVALID_RESPONSE",
+    `O Bitrix24 retornou um lote em formato inesperado (raiz ${describeBatchShape(raw)}, conteúdo ${describeBatchShape(container)}).`,
   );
 }
 export async function listAll<T>(

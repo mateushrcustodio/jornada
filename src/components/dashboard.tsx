@@ -16,6 +16,7 @@ import Link from "next/link";
 import { useState } from "react";
 import type {
   DashboardData,
+  Catalog,
   Deal,
   Filters,
   Movement,
@@ -52,7 +53,10 @@ const subtitles = {
 };
 
 export function Dashboard({ view }: { view: View }) {
-  const { settings, ready } = useApp();
+  const { settings, ready, demo } = useApp();
+  const catalogResource = useResource<Catalog>("/api/catalog", undefined, ready);
+  const catalog = catalogResource.data;
+  const [requested, setRequested] = useState(() => demo);
   const [period, setPeriod] = useState<Period>();
   const [pipeline, setPipeline] = useState("");
   const [stage, setStage] = useState("");
@@ -81,10 +85,11 @@ export function Dashboard({ view }: { view: View }) {
   const resource = useResource<DashboardData>(
     "/api/dashboard",
     body,
-    ready && validCustom,
+    ready && validCustom && requested,
   );
   const data = resource.data;
   function refresh() {
+    setRequested(true);
     setClock(Date.now());
     resource.refresh();
   }
@@ -101,17 +106,17 @@ export function Dashboard({ view }: { view: View }) {
           <span className="last-query">
             {data && !resource.loading && !resource.error
               ? `Consulta: ${dateTime(data.queriedAt)}`
-              : resource.loading
-                ? "Consultando dados…"
+              : requested && resource.loading
+              ? "Consultando dados…"
                 : ""}
           </span>
           <button
             className="button primary"
             onClick={refresh}
-            disabled={resource.loading || !validCustom}
+            disabled={(requested && resource.loading) || !validCustom || !catalog}
           >
-            <RefreshCw size={16} className={resource.loading ? "spin" : ""} />
-            Atualizar
+            <RefreshCw size={16} className={requested && resource.loading ? "spin" : ""} />
+            {requested ? "Atualizar" : "Consultar dados"}
           </button>
         </div>
       </div>
@@ -145,7 +150,7 @@ export function Dashboard({ view }: { view: View }) {
             }}
           >
             <option value="">Todos os pipelines</option>
-            {data?.pipelines
+            {catalog?.pipelines
               .filter(
                 (p) =>
                   !settings.monitoredPipelines.length ||
@@ -166,7 +171,7 @@ export function Dashboard({ view }: { view: View }) {
             onChange={(e) => setStage(e.target.value)}
           >
             <option value="">Todas as etapas</option>
-            {data?.stages
+            {catalog?.stages
               .filter(
                 (s) =>
                   (!pipeline || s.categoryId === Number(pipeline)) &&
@@ -177,7 +182,7 @@ export function Dashboard({ view }: { view: View }) {
                 <option key={`${s.categoryId}:${s.id}`} value={s.id}>
                   {s.name}
                   {!pipeline
-                    ? ` · ${data.pipelines.find((p) => p.id === s.categoryId)?.name}`
+                    ? ` · ${catalog?.pipelines.find((p) => p.id === s.categoryId)?.name}`
                     : ""}
                 </option>
               ))}
@@ -237,7 +242,29 @@ export function Dashboard({ view }: { view: View }) {
             description="Selecione as datas inicial e final, em ordem, com intervalo de até 366 dias."
           />
         </div>
-      ) : resource.loading || !ready ? (
+      ) : !ready || catalogResource.loading ? (
+        <Skeleton />
+      ) : catalogResource.error ? (
+        <div className="dashboard-body">
+          <ErrorState
+            message={catalogResource.error}
+            code={catalogResource.code}
+            retry={catalogResource.refresh}
+          />
+        </div>
+      ) : !requested ? (
+        <div className="dashboard-body">
+          <Empty
+            title="Escolha os filtros antes de consultar"
+            description="Os pipelines e etapas já foram carregados. Selecione os filtros desejados e clique em Consultar dados para buscar o histórico real."
+            action={
+              <button className="button primary" onClick={refresh} disabled={!validCustom || !catalog}>
+                Consultar dados
+              </button>
+            }
+          />
+        </div>
+      ) : resource.loading ? (
         <Skeleton />
       ) : resource.error ? (
         <div className="dashboard-body">
@@ -249,6 +276,12 @@ export function Dashboard({ view }: { view: View }) {
         </div>
       ) : data ? (
         <div className="dashboard-body">
+          {data.warning && (
+            <div className="info-banner" role="status">
+              <Clock3 size={18} />
+              <span>{data.warning}</span>
+            </div>
+          )}
           {view === "overview" && (
             <>
               <Metrics data={data} />

@@ -14,8 +14,9 @@ export default function RootLayout({
   children: React.ReactNode;
 }) {
   return (
-    <html lang="pt-BR">
+    <html lang="pt-BR" suppressHydrationWarning>
       <body>
+        {/* Extensões do navegador podem adicionar atributos ao html antes da hidratação. */}
         <AppProvider demo={process.env.DEMO_MODE === "true"}>
           <Shell>{children}</Shell>
         </AppProvider>

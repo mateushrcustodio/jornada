@@ -22,14 +22,26 @@ export function useResource<T>(url: string, body?: string, enabled = true) {
           cache: "no-store",
         });
         const result = await response.json();
-        if (!response.ok)
+        if (!response.ok) {
+          console.error("[Jornada] Falha na API", {
+            url,
+            status: response.status,
+            statusText: response.statusText,
+            payload: result,
+          });
           throw Object.assign(
             new Error(result.error || "Não foi possível consultar os dados."),
             { code: result.code },
           );
+        }
         if (!controller.signal.aborted)
           setState({ data: result, loading: false });
       } catch (error) {
+        if (!controller.signal.aborted)
+          console.error("[Jornada] Erro ao consultar recurso", {
+            url,
+            message: error instanceof Error ? error.message : error,
+          });
         if (!controller.signal.aborted)
           setState({
             loading: false,

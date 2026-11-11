@@ -90,6 +90,8 @@ export interface DashboardData extends Catalog {
   average: number;
   queriedAt: string;
   demo: boolean;
+  warning?: string;
+  partial?: boolean;
 }
 export interface JourneyData extends Catalog {
   deal: Deal;

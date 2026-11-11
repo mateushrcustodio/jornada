@@ -18,7 +18,7 @@ import {
 import { demoDataset } from "../demo";
 import { isDemo } from "./config";
 import { getSession, type Session } from "./session";
-import { listAll, rest, unwrap } from "./client";
+import { batch, listAll, listPage, rest, unwrap } from "./client";
 import { BitrixError } from "./errors";
 
 export async function getCatalog(providedSession?: Session): Promise<Catalog> {
@@ -33,11 +33,37 @@ export async function getCatalog(providedSession?: Session): Promise<Catalog> {
     "categories",
   );
   const stages = [];
-  for (const pipeline of pipelines) {
-    const result = await rest<RawStatus[]>(session, "crm.status.entity.items", {
-      entityId:
-        Number(pipeline.id) === 0 ? "DEAL_STAGE" : `DEAL_STAGE_${pipeline.id}`,
-    });
+  let statusResults: unknown[];
+  try {
+    statusResults = await batch(
+      session,
+      pipelines.map((pipeline) => ({
+        method: "crm.status.entity.items",
+        query: {
+          entityId:
+            Number(pipeline.id) === 0
+              ? "DEAL_STAGE"
+              : `DEAL_STAGE_${pipeline.id}`,
+        },
+        as: `pipeline_${pipeline.id}`,
+      })),
+    );
+  } catch {
+    // Alguns portais/versões retornam um envelope de batch incompatível;
+    // o catálogo continua disponível via chamadas individuais.
+    statusResults = await Promise.all(
+      pipelines.map((pipeline) =>
+        rest<RawStatus[]>(session, "crm.status.entity.items", {
+          entityId:
+            Number(pipeline.id) === 0
+              ? "DEAL_STAGE"
+              : `DEAL_STAGE_${pipeline.id}`,
+        }),
+      ),
+    );
+  }
+  for (const [pipelineIndex, pipeline] of pipelines.entries()) {
+    const result = statusResults[pipelineIndex];
     // O diretório nem sempre retorna cores. O índice ordenado mantém uma paleta
     // consistente na sessão, sem transformar uma cor visual em dado do CRM.
     const palette = [
@@ -48,7 +74,7 @@ export async function getCatalog(providedSession?: Session): Promise<Catalog> {
       "#4e9e85",
       "#c97979",
     ];
-    for (const [index, s] of unwrap<RawStatus>(result.result).entries())
+    for (const [index, s] of unwrapBatch<RawStatus>(result).entries())
       stages.push({
         id: s.STATUS_ID,
         name: s.NAME,
@@ -98,6 +124,11 @@ function normalizeDeals(rows: Deal[]): Deal[] {
     categoryId: Number(d.categoryId),
   }));
 }
+function unwrapBatch<T>(value: unknown, key = "items"): T[] {
+  if (value && typeof value === "object" && "result" in value)
+    return unwrapBatch<T>((value as { result: unknown }).result, key);
+  return unwrap<T>(value, key);
+}
 export async function getDashboard(filters: Filters, settings: Settings) {
   const now = Date.now();
   if (isDemo()) {
@@ -126,14 +157,12 @@ export async function getDashboard(filters: Filters, settings: Settings) {
   };
   const activeFilter: Record<string, unknown> = { stageSemanticId: "P" };
   if (pipelineFilter !== undefined) {
-    historyFilter.CATEGORY_ID = pipelineFilter;
     activeFilter.categoryId = pipelineFilter;
   }
   if (filters.stage) {
-    historyFilter.STAGE_ID = filters.stage;
     activeFilter.stageId = filters.stage;
   }
-  const recent = normalizeHistory(
+  const recentRows = normalizeHistory(
     await listAll<HistoryEntry>(session, "crm.stagehistory.list", {
       entityTypeId: 2,
       filter: historyFilter,
@@ -141,48 +170,105 @@ export async function getDashboard(filters: Filters, settings: Settings) {
       order: { CREATED_TIME: "DESC", ID: "DESC" },
     }),
   );
+  // Alguns portais não aplicam CATEGORY_ID/STAGE_ID de forma consistente no
+  // histórico. O período é filtrado no REST e o recorte de pipeline/etapa é
+  // aplicado localmente, preservando as movimentações reais.
+  const recent = recentRows.filter(
+    (entry) =>
+      (filters.pipeline === undefined || entry.CATEGORY_ID === filters.pipeline) &&
+      (!filters.stage || entry.STAGE_ID === filters.stage),
+  );
   // Sem filtro de data aqui: negócios sem movimentação no período também podem estar parados.
-  const active = normalizeDeals(
-    await listAll<Deal>(
+  // A visão geral não deve baixar milhares de cards de uma vez. Usamos a
+  // primeira página para calcular os indicadores e informamos ao usuário
+  // quando o portal possui mais cards do que o recorte consultado.
+  let active: Deal[];
+  let activeTotal: number;
+  try {
+    const rows = await listAll<Deal>(
       session,
       "crm.item.list",
       { entityTypeId: 2, filter: activeFilter, select: dealSelect },
       "items",
       500,
-    ),
-  );
+    );
+    active = normalizeDeals(rows);
+    activeTotal = active.length;
+  } catch (error) {
+    if (!(error instanceof BitrixError) || error.code !== "QUERY_TOO_LARGE")
+      throw error;
+    const activePage = await listPage<Deal>(session, "crm.item.list", {
+      entityTypeId: 2,
+      filter: activeFilter,
+      select: dealSelect,
+    });
+    active = normalizeDeals(activePage.items.slice(0, 500));
+    activeTotal = Number.isFinite(Number(activePage.total))
+      ? Number(activePage.total)
+      : active.length;
+  }
   const ids = [
     ...new Set([...recent.map((h) => h.OWNER_ID), ...active.map((d) => d.id)]),
   ];
-  if (ids.length > 500)
-    throw new BitrixError(
-      "QUERY_TOO_LARGE",
-      "Mais de 500 negócios na consulta. Selecione um pipeline ou reduza o período.",
-      422,
-    );
+  const queryLimit = 500;
+  const limitedIds = ids.slice(0, queryLimit);
+  const partial = ids.length > queryLimit || activeTotal > active.length;
   const deals: Deal[] = [];
   const history: HistoryEntry[] = [];
-  for (let i = 0; i < ids.length; i += 50) {
-    // A consulta de itens confirma o acesso antes de retornar qualquer histórico ao navegador.
-    const readable = normalizeDeals(
-      await listAll<Deal>(session, "crm.item.list", {
-        entityTypeId: 2,
-        filter: { "@id": ids.slice(i, i + 50) },
-        select: dealSelect,
-      }),
-    );
-    deals.push(...readable);
-    if (readable.length)
-      history.push(
-        ...normalizeHistory(
-          await listAll<HistoryEntry>(session, "crm.stagehistory.list", {
+  for (let i = 0; i < limitedIds.length; i += 50) {
+    const chunkIds = limitedIds.slice(i, i + 50);
+    let readable: Deal[];
+    let chunkHistory: HistoryEntry[];
+    try {
+      // O batch reduz duas chamadas REST sequenciais a uma ida ao Bitrix24.
+      const responses = await batch(session, [
+        {
+          method: "crm.item.list",
+          query: {
             entityTypeId: 2,
-            filter: { OWNER_ID: readable.map((d) => d.id) },
+            filter: { "@id": chunkIds },
+            select: dealSelect,
+          },
+          as: `deals_${i}`,
+        },
+        {
+          method: "crm.stagehistory.list",
+          query: {
+            entityTypeId: 2,
+            filter: { OWNER_ID: chunkIds },
             select: historySelect,
             order: { CREATED_TIME: "ASC", ID: "ASC" },
-          }),
-        ),
+          },
+          as: `history_${i}`,
+        },
+      ]);
+      readable = normalizeDeals(unwrapBatch<Deal>(responses[0]));
+      chunkHistory = normalizeHistory(unwrapBatch<HistoryEntry>(responses[1]));
+    } catch {
+      // Mantém uma rota de compatibilidade para portais que ainda não
+      // disponibilizam subrequests ou para respostas antigas do REST.
+      // O lote é uma otimização; se ele falhar, a consulta sequencial continua
+      // sendo a fonte de verdade para não bloquear o painel.
+      readable = normalizeDeals(
+        await listAll<Deal>(session, "crm.item.list", {
+          entityTypeId: 2,
+          filter: { "@id": chunkIds },
+          select: dealSelect,
+        }),
       );
+      chunkHistory = readable.length
+        ? normalizeHistory(
+            await listAll<HistoryEntry>(session, "crm.stagehistory.list", {
+              entityTypeId: 2,
+              filter: { OWNER_ID: readable.map((d) => d.id) },
+              select: historySelect,
+              order: { CREATED_TIME: "ASC", ID: "ASC" },
+            }),
+          )
+        : [];
+    }
+    deals.push(...readable);
+    history.push(...chunkHistory);
     if (history.length > 10000)
       throw new BitrixError(
         "QUERY_TOO_LARGE",
@@ -190,7 +276,7 @@ export async function getDashboard(filters: Filters, settings: Settings) {
         422,
       );
   }
-  return buildDashboard(
+  const result = buildDashboard(
     deals,
     history,
     catalog,
@@ -200,6 +286,14 @@ export async function getDashboard(filters: Filters, settings: Settings) {
     false,
     session.domain,
   );
+  return {
+    ...result,
+    activeCount: activeTotal,
+    partial,
+    warning: partial
+      ? `A consulta analisou ${limitedIds.length} negócios nesta atualização. O portal possui ${activeTotal} negócios em andamento; selecione um pipeline ou reduza o período para detalhar todos.`
+      : undefined,
+  };
 }
 export async function getJourney(id: number) {
   if (isDemo()) {
