@@ -3,6 +3,13 @@ import { randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { BitrixError } from "./errors";
 import type { Catalog, Deal, HistoryEntry } from "../types";
+export interface MovementRows {
+  key: string;
+  expiresAt: number;
+  rows: HistoryEntry[];
+  total: number;
+  truncated: boolean;
+}
 export interface Session {
   id: string;
   domain: string;
@@ -29,6 +36,10 @@ export interface Session {
     key: string;
     promise: Promise<{ deals: Deal[]; history: HistoryEntry[] }>;
   };
+  // Linhas do histórico do período (só a lista, sem ler cada negócio) para
+  // paginar Movimentações sem refazer a leitura a cada página.
+  movementRows?: MovementRows;
+  movementRowsPending?: { key: string; promise: Promise<MovementRows> };
   refreshPending?: Promise<void>;
 }
 // Uma instância Node, sem persistência. Reinícios exigem reabrir o app no portal.

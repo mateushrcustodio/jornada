@@ -20,12 +20,14 @@ import type {
   Deal,
   Filters,
   Movement,
+  PageData,
   Period,
   Pipeline,
   Retention,
   StalledDeal,
   View,
 } from "@/lib/types";
+import { PAGE_SIZE } from "@/lib/types";
 import { dateTime, duration, periodRange } from "@/lib/format";
 import { useApp } from "./provider";
 import { useResource } from "./use-resource";
@@ -113,17 +115,41 @@ export function Dashboard({ view }: { view: View }) {
       }
     : undefined;
   const body = JSON.stringify({ filters, settings });
+  // Movimentações e Parados só buscam o total e a página aberta; a visão geral
+  // e as etapas precisam de todos os dados para calcular médias e contagens.
+  const paged = view === "movements" || view === "stalled";
+  const canQuery = ready && validCustom && requested;
   const resource = useResource<DashboardData>(
     "/api/dashboard",
     body,
-    ready && validCustom && requested,
+    canQuery && !paged,
     DASHBOARD_CACHE_MS,
   );
   const data = resource.data;
+  // A página volta para a primeira ao mudar de aba, filtro, configuração ou
+  // ao atualizar; a assinatura evita um efeito só para zerar o contador.
+  const pageSignature = `${view}\n${body}\n${clock}`;
+  const [pageState, setPageState] = useState({ signature: "", page: 1 });
+  const page = pageState.signature === pageSignature ? pageState.page : 1;
+  const pageResource = useResource<PageData<Movement> | PageData<StalledDeal>>(
+    "/api/dashboard/page",
+    JSON.stringify({ filters, settings, kind: view, page, asOf: clock }),
+    canQuery && paged,
+    DASHBOARD_CACHE_MS,
+  );
+  const active = paged ? pageResource : resource;
+  const queriedAt = paged ? pageResource.data?.queriedAt : data?.queriedAt;
+  const paging = (rows: PageData<Movement | StalledDeal>): Paging => ({
+    total: rows.total,
+    page: rows.page,
+    size: rows.pageSize || PAGE_SIZE,
+    busy: pageResource.loading,
+    onChange: (next) => setPageState({ signature: pageSignature, page: next }),
+  });
   function refresh() {
     setRequested(true);
     setClock(Date.now());
-    resource.refresh();
+    active.refresh();
   }
   const hasFilters =
     !!pipeline || !!stage || effectivePeriod !== settings.defaultPeriod;
@@ -136,18 +162,21 @@ export function Dashboard({ view }: { view: View }) {
         </div>
         <div className="heading-actions">
           <span className="last-query">
-            {data && !resource.loading && !resource.error
-              ? `Consulta: ${dateTime(data.queriedAt)}`
-              : requested && resource.loading
-              ? "Consultando dados…"
+            {queriedAt && !active.loading && !active.error
+              ? `Consulta: ${dateTime(queriedAt)}`
+              : requested && active.loading
+                ? "Consultando dados…"
                 : ""}
           </span>
           <button
             className="button primary"
             onClick={refresh}
-            disabled={(requested && resource.loading) || !validCustom || !catalog}
+            disabled={(requested && active.loading) || !validCustom || !catalog}
           >
-            <RefreshCw size={16} className={requested && resource.loading ? "spin" : ""} />
+            <RefreshCw
+              size={16}
+              className={requested && active.loading ? "spin" : ""}
+            />
             {requested ? "Atualizar" : "Consultar dados"}
           </button>
         </div>
@@ -291,12 +320,68 @@ export function Dashboard({ view }: { view: View }) {
             title="Escolha os filtros antes de consultar"
             description="Os pipelines e etapas já foram carregados. Selecione os filtros desejados e clique em Consultar dados para buscar o histórico real."
             action={
-              <button className="button primary" onClick={refresh} disabled={!validCustom || !catalog}>
+              <button
+                className="button primary"
+                onClick={refresh}
+                disabled={!validCustom || !catalog}
+              >
                 Consultar dados
               </button>
             }
           />
         </div>
+      ) : paged ? (
+        pageResource.error ? (
+          <div className="dashboard-body">
+            <ErrorState
+              message={pageResource.error}
+              code={pageResource.code}
+              retry={refresh}
+            />
+          </div>
+        ) : !pageResource.data ? (
+          <Skeleton />
+        ) : (
+          <div className="dashboard-body">
+            {pageResource.data.warning && (
+              <div className="info-banner" role="status">
+                <Clock3 size={18} />
+                <span>{pageResource.data.warning}</span>
+              </div>
+            )}
+            {view === "movements" && (
+              <Movements
+                rows={(pageResource.data as PageData<Movement>).rows}
+                pipelines={catalog?.pipelines ?? []}
+                paging={paging(pageResource.data)}
+              />
+            )}
+            {view === "stalled" && (
+              <>
+                <div className="info-banner">
+                  <Clock3 size={18} />
+                  <span>
+                    <strong>
+                      Limite de {settings.stalledHours} horas na etapa atual.
+                    </strong>{" "}
+                    Inclui negócios ativos sem movimentações no período
+                    selecionado.
+                  </span>
+                  <Link href="/settings">
+                    Ajustar limite
+                    <ArrowUpRight size={14} />
+                  </Link>
+                </div>
+                <Stalled
+                  rows={(pageResource.data as PageData<StalledDeal>).rows}
+                  pipelines={catalog?.pipelines ?? []}
+                  hours={settings.stalledHours}
+                  paging={paging(pageResource.data)}
+                />
+              </>
+            )}
+          </div>
+        )
       ) : resource.loading ? (
         <Skeleton />
       ) : resource.error ? (
@@ -337,32 +422,6 @@ export function Dashboard({ view }: { view: View }) {
                   />
                 </div>
               </div>
-            </>
-          )}
-          {view === "movements" && (
-            <Movements rows={data.movements} pipelines={data.pipelines} />
-          )}
-          {view === "stalled" && (
-            <>
-              <div className="info-banner">
-                <Clock3 size={18} />
-                <span>
-                  <strong>
-                    Limite de {settings.stalledHours} horas na etapa atual.
-                  </strong>{" "}
-                  Inclui negócios ativos sem movimentações no período
-                  selecionado.
-                </span>
-                <Link href="/settings">
-                  Ajustar limite
-                  <ArrowUpRight size={14} />
-                </Link>
-              </div>
-              <Stalled
-                rows={data.stalled}
-                pipelines={data.pipelines}
-                hours={settings.stalledHours}
-              />
             </>
           )}
           {view === "stages" && (
@@ -569,22 +628,35 @@ function RetentionChart({
   );
 }
 
+// Paginação controlada: o painel busca só a página atual e o total.
+interface Paging {
+  total: number;
+  page: number;
+  size: number;
+  busy: boolean;
+  onChange: (page: number) => void;
+}
+
 function Movements({
   rows,
   pipelines,
   compact = false,
+  paging,
 }: {
   rows: Movement[];
   pipelines: Pipeline[];
   compact?: boolean;
+  paging?: Paging;
 }) {
-  const [requestedPage, setPage] = useState(1);
-  const size = compact ? 5 : 10;
-  const page = Math.min(
-    requestedPage,
-    Math.max(1, Math.ceil(rows.length / size)),
-  );
-  const visible = rows.slice((page - 1) * size, page * size);
+  const [requestedPage, setLocalPage] = useState(1);
+  // Com `paging`, as linhas já são só as da página atual (buscadas sob demanda).
+  const size = paging ? paging.size : compact ? 5 : 10;
+  const total = paging ? paging.total : rows.length;
+  const page = paging
+    ? paging.page
+    : Math.min(requestedPage, Math.max(1, Math.ceil(rows.length / size)));
+  const visible = paging ? rows : rows.slice((page - 1) * size, page * size);
+  const setPage = paging ? paging.onChange : setLocalPage;
   return (
     <Panel
       title="Últimas movimentações"
@@ -596,11 +668,11 @@ function Movements({
             <ArrowRight size={14} />
           </Link>
         ) : (
-          <span className="count-badge">{rows.length} registros</span>
+          <span className="count-badge">{total} registros</span>
         )
       }
     >
-      {!rows.length ? (
+      {!total ? (
         <Empty />
       ) : compact ? (
         <div className="movement-list">
@@ -633,7 +705,7 @@ function Movements({
         </div>
       ) : (
         <>
-          <div className="table-scroll">
+          <div className={`table-scroll ${paging?.busy ? "is-busy" : ""}`}>
             <table>
               <thead>
                 <tr>
@@ -686,7 +758,7 @@ function Movements({
           </div>
           <Pagination
             page={page}
-            total={rows.length}
+            total={total}
             size={size}
             onChange={setPage}
           />
@@ -701,19 +773,22 @@ function Stalled({
   pipelines,
   hours,
   compact = false,
+  paging,
 }: {
   rows: StalledDeal[];
   pipelines: Pipeline[];
   hours: number;
   compact?: boolean;
+  paging?: Paging;
 }) {
-  const [requestedPage, setPage] = useState(1);
-  const size = compact ? 3 : 10;
-  const page = Math.min(
-    requestedPage,
-    Math.max(1, Math.ceil(rows.length / size)),
-  );
-  const visible = rows.slice((page - 1) * size, page * size);
+  const [requestedPage, setLocalPage] = useState(1);
+  const size = paging ? paging.size : compact ? 3 : 10;
+  const total = paging ? paging.total : rows.length;
+  const page = paging
+    ? paging.page
+    : Math.min(requestedPage, Math.max(1, Math.ceil(rows.length / size)));
+  const visible = paging ? rows : rows.slice((page - 1) * size, page * size);
+  const setPage = paging ? paging.onChange : setLocalPage;
   return (
     <Panel
       title="Parados há mais tempo"
@@ -729,7 +804,7 @@ function Stalled({
         )
       }
     >
-      {!rows.length ? (
+      {!total ? (
         <Empty
           title="Tudo fluindo por aqui"
           description="Nenhum negócio ativo ultrapassou o limite configurado nos filtros selecionados."
@@ -747,7 +822,9 @@ function Stalled({
                 >
                   <div className="stalled-item-top">
                     <div>
-                      <Link href={`/deal/${row.deal.id}/journey?source=dashboard`}>
+                      <Link
+                        href={`/deal/${row.deal.id}/journey?source=dashboard`}
+                      >
                         <strong>{row.deal.title}</strong>
                       </Link>
                       <span>
@@ -777,7 +854,7 @@ function Stalled({
         </>
       ) : (
         <>
-          <div className="table-scroll">
+          <div className={`table-scroll ${paging?.busy ? "is-busy" : ""}`}>
             <table>
               <thead>
                 <tr>
@@ -823,7 +900,7 @@ function Stalled({
           </div>
           <Pagination
             page={page}
-            total={rows.length}
+            total={total}
             size={size}
             onChange={setPage}
           />

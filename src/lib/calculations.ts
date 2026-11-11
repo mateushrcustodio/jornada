@@ -112,6 +112,20 @@ export function buildJourney(
         : undefined,
   };
 }
+// Regras de pipeline e etapa do painel: filtros da tela, pipelines monitorados
+// e etapas ignoradas nas configurações. Usadas pelo painel completo e pelas
+// páginas sob demanda, para que as duas listas nunca divirjam.
+export function stageFilters(filters: Filters, settings: Settings) {
+  const enabledPipeline = (id: number) =>
+    (filters.pipeline === undefined || filters.pipeline === id) &&
+    (!settings.monitoredPipelines.length ||
+      settings.monitoredPipelines.includes(id));
+  const enabledStage = (id: number, stage: string) =>
+    enabledPipeline(id) &&
+    (!filters.stage || stage === filters.stage) &&
+    !settings.ignoredStages.includes(stageKey(id, stage));
+  return { enabledPipeline, enabledStage };
+}
 export function buildDashboard(
   deals: Deal[],
   history: HistoryEntry[],
@@ -122,14 +136,7 @@ export function buildDashboard(
   demo: boolean,
   domain?: string,
 ): DashboardData {
-  const enabledPipeline = (id: number) =>
-    (filters.pipeline === undefined || filters.pipeline === id) &&
-    (!settings.monitoredPipelines.length ||
-      settings.monitoredPipelines.includes(id));
-  const enabledStage = (id: number, stage: string) =>
-    enabledPipeline(id) &&
-    (!filters.stage || stage === filters.stage) &&
-    !settings.ignoredStages.includes(stageKey(id, stage));
+  const { enabledStage } = stageFilters(filters, settings);
   const allVisits = deals.map((deal) => ({
     deal,
     visits: calculateVisits(history, deal, catalog, now),

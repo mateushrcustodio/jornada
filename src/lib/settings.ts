@@ -19,3 +19,15 @@ export const DEFAULT_SETTINGS = {
   indicators: { movements: true, active: true, stalled: true, average: true },
 } satisfies import("./types").Settings;
 export const SETTINGS_KEY = "jornada-crm.settings.v1";
+export const filtersSchema = z
+  .object({
+    from: z.iso.datetime({ offset: true }),
+    to: z.iso.datetime({ offset: true }),
+    pipeline: z.number().int().nonnegative().optional(),
+    stage: z.string().max(100).optional(),
+  })
+  .refine(
+    (f) =>
+      Date.parse(f.from) <= Date.parse(f.to) &&
+      Date.parse(f.to) - Date.parse(f.from) <= 366 * 86400000,
+  );

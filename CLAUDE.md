@@ -40,7 +40,8 @@ Sempre rode lint, typecheck, `npm test` e, se mexer em tela, build + e2e antes d
 src/app/                    rotas (App Router) e globals.css
   api/bitrix/placement      POST dos placements: valida token/domínio, abre a sessão, redireciona (303)
   api/auth/{start,callback} OAuth opcional fora do iframe
-  api/dashboard             POST com filtros -> painel
+  api/dashboard             POST com filtros -> painel completo (visão geral e etapas)
+  api/dashboard/page        POST -> total + 1 página de Movimentações ou Parados
   api/catalog               pipelines, etapas
   api/deal/[id]             jornada; /benchmark (mediana dos fechados) e /autopsy (publica comentário)
   api/install               registra placements (exige admin)
@@ -48,7 +49,8 @@ src/app/                    rotas (App Router) e globals.css
   dashboard/[view]          movements | stalled | stages
 src/components/
   shell.tsx                 /deal/* => só conteúdo; resto => menu superior
-  dashboard.tsx             todo o painel (Visão geral + 3 views), filtros, cache de 5 min no navegador
+  dashboard.tsx             todo o painel (Visão geral + 3 views), filtros, cache de 5 min no navegador;
+                            Movimentações e Parados usam /api/dashboard/page (paginação controlada)
   compact-journey.tsx       tela do card (timeline, estatísticas, autópsia)  [journey.tsx só reexporta]
   autopsy.tsx               ficha de negócio ganho/perdido
   use-resource.ts           fetch com cache em memória no navegador (cacheMs); refresh forçado ignora o cache
@@ -62,7 +64,7 @@ src/lib/
     session.ts  sessões em memória (cookie HttpOnly), reaproveitamento por usuário
     auth.ts     verifyApp, identifyUser (método `profile`)
     config.ts   env, DEMO_MODE, domínios permitidos
-tests/          *.test.ts (vitest), fake-bitrix.ts (simulador do REST), e2e/app.spec.ts (Playwright)
+tests/          *.test.ts (vitest; performance.test.ts e pagination.test.ts usam o simulador), fake-bitrix.ts (simulador do REST), e2e/app.spec.ts (Playwright)
 ```
 
 ## Regras que não se quebram
@@ -81,14 +83,15 @@ A lentidão vinha de espaçar 550 ms cada chamada REST, chamadas em sequência e
 - **Limitador por portal** (balde de chamadas, compartilhado entre sessões) em `client.ts`. Padrão: rajada 40, 2/s. Ajustável por `BITRIX_RATE_BURST` e `BITRIX_RATE_PER_SECOND` (Enterprise: ~200 e 5). Outros apps do portal consomem o mesmo limite do Bitrix24.
 - **`batch`** (até 50 subcomandos = 1 chamada contada). `listAllBatched` pega a 1ª página para saber o total e pede as demais em lotes. Painel lê negócios + históricos em grupos de 49 IDs, até 6 em paralelo. O card usa 1 `batch` (`crm.item.get` + histórico, `halt=1`).
 - **Sessão reaproveitada** por usuário/portal (`profile`), mantendo catálogo, nomes e amostra de fechados. O POST do placement já aquece o catálogo.
+- **Páginas sob demanda (Movimentações e Parados):** `getMovementsPage` e `getStalledPage` em `service.ts`. Movimentações sem filtro lê só o bloco de 50 do histórico (o total vem do Bitrix24) e um lote com os negócios da página; com filtro, guarda na sessão a lista do período (3 min) e filtra localmente. Parados usa `crm.item.list` ordenado por `movedTime`, com fallback para o cálculo completo. Visão geral e Etapas continuam lendo tudo. Regras de pipeline/etapa vêm de `stageFilters` (`calculations.ts`), compartilhadas com o painel completo.
 - **Caches:** catálogo 5 min (por sessão, com promessa compartilhada), amostra de fechados 10 min, navegador 5 min no painel (`DASHBOARD_CACHE_MS`) com filtros "grudados" ao voltar.
-- Medido no simulador (400 negócios, 200 ms de latência, limites reais): card fechado 5,7 s → 0,6 s; painel 30 d 21,7 s → 0,9 s.
+- Medido no simulador (200 ms de latência, limites reais): card fechado 5,7 s → 0,6 s; painel 30 d (400 negócios) 21,7 s → 0,9 s; Movimentações pág. 1 sem filtro 0,8 s e Parados pág. 1 0,6 s, qualquer que seja o volume (3.000 negócios: painel completo 4,3 s).
 
 ## Testes
 
 - `tests/fake-bitrix.ts` simula o REST (batch, `halt`, permissões, balde 50/2 s). Use-o para qualquer teste de desempenho ou regressão do serviço, sem portal real.
 - Nunca teste contra o portal de produção. O e2e roda sempre em modo demo.
-- **Falhas conhecidas (nov/2026):** 2 de 22 e2e, `jornada mostra timeline e dados próprios do histórico` (desktop e mobile). O teste exige que o cabeçalho não contenha "Enterprise", mas o código do Mateus passou a mostrar o nome do pipeline. Falha igual no código original; não é regressão. Corrija o teste ou o cabeçalho só se pedirem.
+- **Falhas conhecidas (nov/2026):** 2 de 24 e2e, `jornada mostra timeline e dados próprios do histórico` (desktop e mobile). O teste exige que o cabeçalho não contenha "Enterprise", mas o código do Mateus passou a mostrar o nome do pipeline. Falha igual no código original; não é regressão. Corrija o teste ou o cabeçalho só se pedirem.
 - Se o Playwright reclamar de executável do Chromium inexistente, use `npx playwright install chromium` (ou aponte `launchOptions.executablePath` para um Chrome local, sem commitar isso).
 
 ## Como trabalhar neste repositório

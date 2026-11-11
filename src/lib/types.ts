@@ -93,6 +93,19 @@ export interface DashboardData extends Catalog {
   warning?: string;
   partial?: boolean;
 }
+// Uma página das listas de Movimentações e Parados, buscada sob demanda.
+export type PageKind = "movements" | "stalled";
+export const PAGE_SIZE = 10;
+export interface PageData<T> {
+  rows: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+  queriedAt: string;
+  demo: boolean;
+  warning?: string;
+  partial?: boolean;
+}
 export interface JourneyData extends Catalog {
   deal: Deal;
   visits: Visit[];

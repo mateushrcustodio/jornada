@@ -287,3 +287,33 @@ test("card aberto dentro do Bitrix24 não mostra o botão de voltar", async ({
     page.getByRole("link", { name: "Voltar ao painel" }),
   ).toHaveCount(0);
 });
+test("Movimentações e Parados buscam só a página aberta", async ({ page }) => {
+  const full: string[] = [];
+  const pages: { kind: string; page: number }[] = [];
+  page.on("request", (request) => {
+    if (request.method() !== "POST") return;
+    if (request.url().endsWith("/api/dashboard")) full.push(request.url());
+    if (request.url().endsWith("/api/dashboard/page"))
+      pages.push(request.postDataJSON());
+  });
+  await page.goto("/dashboard/movements");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await expect(page.locator(".pagination")).toContainText("Página 1");
+  await page.getByRole("button", { name: "Próxima página" }).click();
+  await expect(page.locator(".pagination")).toContainText("Página 2");
+  // Voltar para uma página já vista não busca de novo.
+  const before = pages.length;
+  await page.getByRole("button", { name: "Página anterior" }).click();
+  await expect(page.locator(".pagination")).toContainText("Página 1");
+  expect(pages.length).toBe(before);
+  expect(pages.every((body) => body.kind === "movements")).toBe(true);
+  expect(pages.map((body) => body.page)).toContain(2);
+  await page.goto("/dashboard/stalled");
+  await expect(
+    page.getByRole("heading", { name: "Negócios parados", exact: true }),
+  ).toBeVisible();
+  await expect(page.locator(".stalled-panel")).toBeVisible();
+  expect(pages.at(-1)?.kind).toBe("stalled");
+  // Nenhuma das duas abas pediu o painel completo.
+  expect(full).toHaveLength(0);
+});

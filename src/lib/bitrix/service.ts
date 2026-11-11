@@ -1,14 +1,26 @@
 import "server-only";
-import type {
-  Catalog,
-  Deal,
-  Filters,
-  HistoryEntry,
-  RawCategory,
-  RawStatus,
-  Settings,
+import {
+  PAGE_SIZE,
+  type Catalog,
+  type Deal,
+  type Filters,
+  type HistoryEntry,
+  type Movement,
+  type PageData,
+  type RawCategory,
+  type RawStatus,
+  type Settings,
+  type StalledDeal,
 } from "../types";
-import { buildDashboard, buildJourney, isClosed } from "../calculations";
+import {
+  buildDashboard,
+  buildJourney,
+  calculateVisits,
+  dealUrl,
+  isClosed,
+  resolveStage,
+  stageFilters,
+} from "../calculations";
 import {
   autopsyText,
   buildAutopsy,
@@ -17,7 +29,7 @@ import {
 } from "../autopsy";
 import { demoDataset } from "../demo";
 import { isDemo } from "./config";
-import { getSession, type Session } from "./session";
+import { getSession, type MovementRows, type Session } from "./session";
 import {
   batch,
   batchWithMeta,
@@ -165,8 +177,7 @@ async function resolveHistoryActors(
       [
         ...rows.map((row) => Number(row.MOVED_BY)),
         ...fallbackDeals.map((deal) => Number(deal.movedBy)),
-      ]
-        .filter((id) => Number.isFinite(id) && id > 0),
+      ].filter((id) => Number.isFinite(id) && id > 0),
     ),
   ];
   if (!ids.length) return rows;
@@ -408,7 +419,11 @@ async function readActiveDeals(
       },
       { limit: 500, overflow: "truncate", idField: "id" },
     );
-    return { active: normalizeDeals(items), activeTotal: total, totalKnown: true };
+    return {
+      active: normalizeDeals(items),
+      activeTotal: total,
+      totalKnown: true,
+    };
   } catch {
     /* Segue para o caminho anterior. */
   }
@@ -511,7 +526,10 @@ async function readDealChunk(session: Session, chunkIds: number[]) {
     return {
       deals: readable,
       history: readable.length
-        ? await readHistoryForOwners(session, readable.map((d) => d.id))
+        ? await readHistoryForOwners(
+            session,
+            readable.map((d) => d.id),
+          )
         : [],
     };
   }
@@ -560,7 +578,8 @@ export async function getDashboard(filters: Filters, settings: Settings) {
   // aplicado localmente, preservando as movimentações reais.
   const recent = recentRows.filter(
     (entry) =>
-      (filters.pipeline === undefined || entry.CATEGORY_ID === filters.pipeline) &&
+      (filters.pipeline === undefined ||
+        entry.CATEGORY_ID === filters.pipeline) &&
       (!filters.stage || entry.STAGE_ID === filters.stage),
   );
   const { active, activeTotal, totalKnown } = activeResult;
@@ -616,6 +635,356 @@ export async function getDashboard(filters: Filters, settings: Settings) {
       : undefined,
   };
 }
+// ---------------------------------------------------------------------------
+// Páginas sob demanda (Movimentações e Parados)
+//
+// O painel completo lê todos os negócios e históricos do período porque a
+// visão geral e as etapas precisam de tudo para calcular médias. Já as listas
+// paginadas só precisam do total e dos dados de uma página por vez.
+// ---------------------------------------------------------------------------
+const MOVEMENT_ROWS_TTL = 3 * 60000;
+// O Bitrix24 devolve 50 registros por chamada; a tela pagina de 10 em 10.
+const REST_PAGE = 50;
+const clampPage = (page: number, total: number) =>
+  Math.min(
+    Math.max(1, Math.floor(page) || 1),
+    Math.max(1, Math.ceil(total / PAGE_SIZE)),
+  );
+
+function emptyPage<T>(page: number, demo: boolean): PageData<T> {
+  return {
+    rows: [],
+    total: 0,
+    page,
+    pageSize: PAGE_SIZE,
+    queriedAt: new Date().toISOString(),
+    demo,
+  };
+}
+
+// Só a lista do histórico do período, mais recentes primeiro. É leve (50
+// linhas por página do REST, lidas em lote) e fica na sessão por alguns
+// minutos: trocar de página não repete essa leitura.
+async function loadMovementRows(
+  session: Session,
+  filters: Filters,
+  asOf: number | undefined,
+): Promise<MovementRows> {
+  const key = `${filters.from}|${filters.to}|${asOf ?? ""}`;
+  const cached = session.movementRows;
+  if (cached && cached.key === key && cached.expiresAt > Date.now())
+    return cached;
+  const inFlight = session.movementRowsPending;
+  if (inFlight && inFlight.key === key) return inFlight.promise;
+  const promise = (async () => {
+    const result = await readRecentHistory(session, {
+      ">=CREATED_TIME": filters.from,
+      "<=CREATED_TIME": filters.to,
+    });
+    const loaded: MovementRows = {
+      key,
+      expiresAt: Date.now() + MOVEMENT_ROWS_TTL,
+      rows: result.rows.sort(
+        (a, b) =>
+          Date.parse(b.CREATED_TIME) - Date.parse(a.CREATED_TIME) ||
+          b.ID - a.ID,
+      ),
+      total: result.total,
+      truncated: result.truncated,
+    };
+    session.movementRows = loaded;
+    return loaded;
+  })().finally(() => {
+    if (session.movementRowsPending?.promise === promise)
+      session.movementRowsPending = undefined;
+  });
+  session.movementRowsPending = { key, promise };
+  return promise;
+}
+
+function sliceRows<T>(rows: T[], page: number): PageData<T> {
+  const current = clampPage(page, rows.length);
+  return {
+    rows: rows.slice((current - 1) * PAGE_SIZE, current * PAGE_SIZE),
+    total: rows.length,
+    page: current,
+    pageSize: PAGE_SIZE,
+    queriedAt: new Date().toISOString(),
+    demo: false,
+  };
+}
+
+// Sem filtro de pipeline, etapa, pipelines monitorados nem etapas ignoradas,
+// o total do Bitrix24 já é o total da lista: basta ler o bloco de 50 que
+// contém a página pedida, sem varrer o período inteiro.
+async function readMovementBlock(
+  session: Session,
+  filters: Filters,
+  page: number,
+): Promise<{ rows: HistoryEntry[]; total: number; page: number }> {
+  const read = (requested: number) => {
+    const start =
+      Math.floor(((requested - 1) * PAGE_SIZE) / REST_PAGE) * REST_PAGE;
+    return listPage<HistoryEntry>(
+      session,
+      "crm.stagehistory.list",
+      {
+        entityTypeId: 2,
+        filter: {
+          ">=CREATED_TIME": filters.from,
+          "<=CREATED_TIME": filters.to,
+        },
+        select: historySelect,
+        // Mesma ordem do painel completo: mais recentes primeiro.
+        order: { CREATED_TIME: "DESC", ID: "DESC" },
+      },
+      "items",
+      start,
+    ).then((answer) => ({ ...answer, start }));
+  };
+  let answer = await read(page);
+  if (answer.total === undefined)
+    throw new BitrixError("NO_TOTAL", "O portal não informou o total.");
+  const total = answer.total;
+  const current = clampPage(page, total);
+  if (current !== page && total > 0) answer = await read(current);
+  const offset = (current - 1) * PAGE_SIZE - answer.start;
+  return {
+    rows: normalizeHistory(answer.items).slice(offset, offset + PAGE_SIZE),
+    total,
+    page: current,
+  };
+}
+
+export async function getMovementsPage(
+  filters: Filters,
+  settings: Settings,
+  page: number,
+  asOf?: number,
+): Promise<PageData<Movement>> {
+  const now = Date.now();
+  if (isDemo()) {
+    const data = demoDataset(now);
+    const full = buildDashboard(
+      data.deals,
+      data.history,
+      data.catalog,
+      filters,
+      settings,
+      now,
+      true,
+    );
+    return { ...sliceRows(full.movements, page), demo: true };
+  }
+  const session = await getSession();
+  const { enabledStage } = stageFilters(filters, settings);
+  const unfiltered =
+    filters.pipeline === undefined &&
+    !filters.stage &&
+    !settings.monitoredPipelines.length &&
+    !settings.ignoredStages.length;
+  const result: PageData<Movement> = {
+    rows: [],
+    total: 0,
+    page: 1,
+    pageSize: PAGE_SIZE,
+    queriedAt: new Date(now).toISOString(),
+    demo: false,
+  };
+  let pageRows: HistoryEntry[] | undefined;
+  const catalogRead = getCatalog(session);
+  // Se a leitura abaixo falhar primeiro, o erro do catálogo não fica sem tratamento.
+  catalogRead.catch(() => undefined);
+  if (unfiltered) {
+    try {
+      const block = await readMovementBlock(session, filters, page);
+      pageRows = block.rows;
+      result.total = block.total;
+      result.page = block.page;
+    } catch (error) {
+      if (error instanceof BitrixError && [401, 403].includes(error.status))
+        throw error;
+      // Portal que não aceite a leitura por blocos: segue pela lista completa.
+    }
+  }
+  if (!pageRows) {
+    const loaded = await loadMovementRows(session, filters, asOf);
+    // Pipeline, etapa e etapas ignoradas são aplicados aqui: alguns portais
+    // não respeitam esses filtros no histórico, e assim o total é exato.
+    const matching = loaded.rows.filter((row) =>
+      enabledStage(row.CATEGORY_ID, row.STAGE_ID),
+    );
+    result.total = matching.length;
+    result.page = clampPage(page, matching.length);
+    pageRows = matching.slice(
+      (result.page - 1) * PAGE_SIZE,
+      result.page * PAGE_SIZE,
+    );
+    if (loaded.truncated) {
+      result.partial = true;
+      result.warning = `O período tem ${loaded.total} movimentações; a lista mostra as ${loaded.rows.length} mais recentes. Selecione um pipeline ou reduza o período para ver todas.`;
+    }
+  }
+  const catalog = await catalogRead;
+  if (!pageRows.length) return result;
+  // Só os negócios desta página (no máximo 10): a lista que confirma o acesso
+  // do usuário e o histórico de cada um, num único lote.
+  const ids = [...new Set(pageRows.map((row) => row.OWNER_ID))];
+  const { deals, history } = await readDealChunk(session, ids);
+  const resolved = await resolveHistoryActors(session, history, deals);
+  const dealsById = new Map(deals.map((deal) => [deal.id, deal]));
+  const visitsByDeal = new Map<number, ReturnType<typeof calculateVisits>>();
+  for (const row of pageRows) {
+    const deal = dealsById.get(row.OWNER_ID);
+    // Sem acesso ao negócio, a movimentação não é exibida.
+    if (!deal) continue;
+    let visits = visitsByDeal.get(deal.id);
+    if (!visits) {
+      visits = calculateVisits(resolved, deal, catalog, now);
+      visitsByDeal.set(deal.id, visits);
+    }
+    const visit = visits.find((v) => v.entry.ID === row.ID);
+    if (visit)
+      result.rows.push({
+        ...visit,
+        deal,
+        url: dealUrl(session.domain, deal.id),
+      });
+  }
+  return result;
+}
+
+// Filtro REST dos negócios parados, equivalente às regras do painel completo:
+// pipelines (filtro da tela ou monitorados), etapa e etapas ignoradas.
+function stalledFilter(
+  catalog: Catalog,
+  filters: Filters,
+  settings: Settings,
+  cutoff: string,
+): Record<string, unknown> | undefined {
+  const { enabledPipeline, enabledStage } = stageFilters(filters, settings);
+  const filter: Record<string, unknown> = {
+    stageSemanticId: "P",
+    "<=movedTime": cutoff,
+  };
+  if (filters.pipeline !== undefined) {
+    if (!enabledPipeline(filters.pipeline)) return undefined;
+    filter.categoryId = filters.pipeline;
+  } else if (settings.monitoredPipelines.length) {
+    filter.categoryId = settings.monitoredPipelines;
+  }
+  if (filters.stage) {
+    if (
+      filters.pipeline !== undefined &&
+      !enabledStage(filters.pipeline, filters.stage)
+    )
+      return undefined;
+    filter.stageId = filters.stage;
+  } else if (settings.ignoredStages.length) {
+    // O REST só recebe as etapas permitidas; as ignoradas ficam de fora.
+    const allowed = catalog.stages
+      .filter((stage) => enabledStage(stage.categoryId, stage.id))
+      .map((stage) => stage.id);
+    if (!allowed.length) return undefined;
+    filter.stageId = allowed;
+  }
+  return filter;
+}
+
+export async function getStalledPage(
+  filters: Filters,
+  settings: Settings,
+  page: number,
+): Promise<PageData<StalledDeal>> {
+  const now = Date.now();
+  if (isDemo()) {
+    const data = demoDataset(now);
+    const full = buildDashboard(
+      data.deals,
+      data.history,
+      data.catalog,
+      filters,
+      settings,
+      now,
+      true,
+    );
+    return { ...sliceRows(full.stalled, page), demo: true };
+  }
+  const session = await getSession();
+  try {
+    const catalog = await getCatalog(session);
+    const cutoff = new Date(
+      now - settings.stalledHours * 3600000,
+    ).toISOString();
+    const filter = stalledFilter(catalog, filters, settings, cutoff);
+    if (!filter) return emptyPage(1, false);
+    const { enabledStage } = stageFilters(filters, settings);
+    // Ordenar por movedTime crescente é o mesmo que ordenar pelo tempo parado,
+    // do maior para o menor. O Bitrix24 devolve o total junto com a página.
+    const read = (requested: number) => {
+      const start =
+        Math.floor(((requested - 1) * PAGE_SIZE) / REST_PAGE) * REST_PAGE;
+      return listPage<Deal>(
+        session,
+        "crm.item.list",
+        {
+          entityTypeId: 2,
+          filter,
+          select: dealSelect,
+          order: { movedTime: "ASC", id: "ASC" },
+        },
+        "items",
+        start,
+      ).then((answer) => ({ ...answer, start }));
+    };
+    let answer = await read(page);
+    if (answer.total === undefined)
+      throw new BitrixError("NO_TOTAL", "O portal não informou o total.");
+    const total = answer.total;
+    const current = clampPage(page, total);
+    // Página pedida além do fim (a lista encolheu): relê a última.
+    if (current !== page && total > 0) answer = await read(current);
+    const offset = (current - 1) * PAGE_SIZE - answer.start;
+    const rows = normalizeDeals(answer.items)
+      .slice(offset, offset + PAGE_SIZE)
+      .filter(
+        (deal) =>
+          enabledStage(deal.categoryId, deal.stageId) &&
+          deal.movedTime &&
+          Number.isFinite(Date.parse(deal.movedTime)),
+      )
+      .map((deal): StalledDeal => ({
+        deal,
+        enteredAt: deal.movedTime!,
+        stage: resolveStage(catalog, {
+          CATEGORY_ID: deal.categoryId,
+          STAGE_ID: deal.stageId,
+        }),
+        duration: Math.max(0, now - Date.parse(deal.movedTime!)),
+        url: dealUrl(session.domain, deal.id),
+      }));
+    return {
+      rows,
+      total,
+      page: current,
+      pageSize: PAGE_SIZE,
+      queriedAt: new Date(now).toISOString(),
+      demo: false,
+    };
+  } catch (error) {
+    // Sem sessão ou sem permissão, não há o que tentar de outro jeito.
+    if (error instanceof BitrixError && [401, 403].includes(error.status))
+      throw error;
+    // Se o portal não aceitar o filtro por movedTime, calcula pelo caminho
+    // completo (mais lento, mas igual ao painel) e entrega a página pedida.
+    const full = await getDashboard(filters, settings);
+    return {
+      ...sliceRows(full.stalled, page),
+      warning: full.warning,
+      partial: full.partial,
+    };
+  }
+}
 export async function getJourney(id: number) {
   if (isDemo()) {
     const { catalog, deals, history } = demoDataset();
@@ -648,7 +1017,11 @@ export async function getJourney(id: number) {
 }
 function batchItem(value: unknown): Deal | undefined {
   let current = value;
-  for (let depth = 0; depth < 3 && current && typeof current === "object"; depth += 1) {
+  for (
+    let depth = 0;
+    depth < 3 && current && typeof current === "object";
+    depth += 1
+  ) {
     if ("item" in current) {
       const item = (current as { item: unknown }).item;
       return item && typeof item === "object" ? (item as Deal) : undefined;
