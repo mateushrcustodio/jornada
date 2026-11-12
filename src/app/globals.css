@@ -123,16 +123,18 @@ main:focus {
 }
 
 /* ---------- Estrutura ---------- */
+/* Painel ocupa toda a largura do iframe do Bitrix24: a linha do cabeçalho vai de borda a borda
+   e o conteúdo mantém um respiro lateral de 32px (a aba do card usa .card-shell, intocada). */
 .app-shell {
-  max-width: 1360px;
-  margin: 0 auto;
-  padding: 0 32px 56px;
+  width: 100%;
+  padding: 0 0 56px;
 }
 .topnav {
   display: flex;
   align-items: stretch;
   gap: 32px;
   min-height: 56px;
+  padding: 0 32px;
   border-bottom: 1px solid var(--line);
 }
 .brand {
@@ -220,7 +222,7 @@ main:focus {
   white-space: nowrap;
 }
 .main-content {
-  padding-top: 32px;
+  padding: 32px 32px 0;
   min-height: 75vh;
 }
 .main-content > * {
@@ -1132,11 +1134,22 @@ td {
   margin-top: 24px;
 }
 .settings-grid,
-.install-grid {
+.install-grid,
+.settings-layout {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(340px, 100%), 1fr));
   gap: 20px;
   align-items: start;
+}
+/* Ritmo + Indicadores empilhados na 1ª coluna; Pipelines e Etapas ignoradas lado a lado,
+   todos começando no topo, sem o card "caindo" para o fim da página. */
+.settings-column {
+  display: grid;
+  gap: 20px;
+  min-width: 0;
+}
+.settings-layout > * {
+  min-width: 0;
 }
 .form-fields {
   display: grid;
@@ -1537,12 +1550,12 @@ td {
 }
 @media (max-width: 760px) {
   .app-shell {
-    padding: 0 14px 32px;
+    padding: 0 0 32px;
   }
   .topnav {
     flex-wrap: wrap;
     gap: 0 10px;
-    padding-top: 10px;
+    padding: 10px 14px 0;
   }
   .nav-pills {
     order: 3;
@@ -1557,7 +1570,7 @@ td {
     margin-left: auto;
   }
   .main-content {
-    padding-top: 24px;
+    padding: 24px 14px 0;
   }
   .panel {
     padding: 16px;
@@ -1596,7 +1609,8 @@ td {
     justify-content: flex-start;
   }
   .settings-grid,
-  .install-grid {
+  .install-grid,
+  .settings-layout {
     grid-template-columns: minmax(0, 1fr);
   }
 }

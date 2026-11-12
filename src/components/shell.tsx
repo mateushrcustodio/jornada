@@ -1,5 +1,5 @@
 "use client";
-import { Plug, Settings2 } from "lucide-react";
+import { Settings2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -127,14 +127,6 @@ export function Shell({ children }: { children: ReactNode }) {
             aria-current={path === "/settings" ? "page" : undefined}
           >
             <Settings2 size={18} />
-          </Link>
-          <Link
-            href="/install"
-            className="icon-button"
-            aria-label="Integração e instalação"
-            aria-current={path === "/install" ? "page" : undefined}
-          >
-            <Plug size={18} />
           </Link>
         </div>
       </header>

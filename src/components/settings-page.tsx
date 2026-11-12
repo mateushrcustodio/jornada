@@ -92,7 +92,8 @@ function SettingsForm({
         </span>
       </div>
       <form onSubmit={submit} className="settings-form">
-        <div className="settings-grid">
+        <div className="settings-layout">
+          <div className="settings-column">
           <Panel title="Ritmo de acompanhamento">
             <div className="form-fields">
               <label className="form-field">
@@ -187,6 +188,7 @@ function SettingsForm({
               ))}
             </div>
           </Panel>
+          </div>
           <Panel
             title="Pipelines monitorados"
             action={
