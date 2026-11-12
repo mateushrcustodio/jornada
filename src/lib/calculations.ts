@@ -9,6 +9,7 @@ import type {
   Stage,
   Visit,
 } from "./types";
+import { LEGACY_STAGE_NAMES } from "./legacy-stages";
 
 export const stageKey = (categoryId: number, id: string) =>
   `${categoryId}:${id}`;
@@ -24,7 +25,11 @@ export function resolveStage(
     ) ?? {
       id: entry.STAGE_ID,
       categoryId: entry.CATEGORY_ID,
-      name: entry.STAGE_ID,
+      // Etapa que não está mais no funil: usa o nome conhecido ou deixa claro
+      // que foi removida, em vez de mostrar só o ID.
+      name:
+        LEGACY_STAGE_NAMES[stageKey(entry.CATEGORY_ID, entry.STAGE_ID)] ??
+        `Etapa removida (${entry.STAGE_ID})`,
       color: "#7b8294",
       sort: 0,
     }

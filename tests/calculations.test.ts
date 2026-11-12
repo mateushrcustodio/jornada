@@ -3,6 +3,7 @@ import {
   buildDashboard,
   buildJourney,
   calculateVisits,
+  resolveStage,
   stageKey,
 } from "@/lib/calculations";
 import { DEFAULT_SETTINGS } from "@/lib/settings";
@@ -228,5 +229,17 @@ describe("painel e retenção", () => {
       from: "2026-11-01T03:00:00.000Z",
       to: "2026-11-03T02:59:59.999Z",
     });
+  });
+  it("resolve etapas que saíram do funil pelo mapa de nomes antigos", () => {
+    expect(
+      resolveStage(catalog, { CATEGORY_ID: 49, STAGE_ID: "C49:UC_J36A0V" })
+        .name,
+    ).toBe("Converter Negócio");
+    expect(
+      resolveStage(catalog, { CATEGORY_ID: 0, STAGE_ID: "UC_SUMIU" }).name,
+    ).toBe("Etapa removida (UC_SUMIU)");
+    expect(
+      resolveStage(catalog, { CATEGORY_ID: 0, STAGE_ID: "NEW" }).name,
+    ).toBe("Entrada");
   });
 });
