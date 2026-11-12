@@ -285,22 +285,136 @@ describe("painel", () => {
     expect(actual.stalled.length).toBeGreaterThan(0);
     expect(data.partial).toBe(false);
   });
-  it("com mais de 500 ativos, informa o total real sem baixar tudo", async () => {
-    const fake = createFakeBitrix({ now: NOW, deals: 900, moves: () => 1 });
-    vi.stubGlobal("fetch", fake.fetch);
-    const data = await service.getDashboard(
-      {
-        from: new Date(NOW - 86400000).toISOString(),
-        to: new Date(NOW).toISOString(),
-      },
-      DEFAULT_SETTINGS,
+  // Painel que o app deveria devolver com todos os dados lidos: todos os
+  // negócios do período e os ativos, cada um com o histórico completo.
+  const expectedDashboard = async (
+    fake: ReturnType<typeof createFakeBitrix>,
+    filters: { from: string; to: string },
+  ) => {
+    const inPeriod = new Set(
+      fake.history
+        .filter(
+          (h) =>
+            Date.parse(String(h.CREATED_TIME)) >= Date.parse(filters.from) &&
+            Date.parse(String(h.CREATED_TIME)) <= Date.parse(filters.to),
+        )
+        .map((h) => Number(h.OWNER_ID)),
     );
-    const activeTotal = fake.readableDeals().filter((d) => d.stageSemanticId === "P").length;
+    const deals = asDeals(fake.readableDeals()).filter(
+      (d) => inPeriod.has(d.id) || d.stageSemanticId === "P",
+    );
+    const ids = new Set(deals.map((d) => d.id));
+    return withoutClock(
+      buildDashboard(
+        deals,
+        asHistory(fake.history.filter((h) => ids.has(Number(h.OWNER_ID)))),
+        await service.getCatalog(current.session!),
+        filters,
+        DEFAULT_SETTINGS,
+        NOW,
+        false,
+        DOMAIN,
+      ),
+    );
+  };
+  const periodOf = (days: number) => ({
+    from: new Date(NOW - days * 86400000).toISOString(),
+    to: new Date(NOW).toISOString(),
+  });
+  const byDeal = (rows: { deal: { id: number } }[]) =>
+    [...rows].sort((a, b) => a.deal.id - b.deal.id);
+  const expectSameDashboard = (
+    actual: unknown,
+    expected: ReturnType<typeof withoutClock>,
+  ) => {
+    const data = withoutClock(actual);
+    expect(
+      data.movements.map((m: { entry: { ID: number } }) => m.entry.ID),
+    ).toEqual(
+      expected.movements.map((m: { entry: { ID: number } }) => m.entry.ID),
+    );
+    expect(byDeal(data.stalled)).toEqual(byDeal(expected.stalled));
+    expect(data.retention).toEqual(expected.retention);
+    expect(data.average).toEqual(expected.average);
+  };
+  const historyReads = (fake: ReturnType<typeof createFakeBitrix>) =>
+    fake.stats.byMethod["crm.stagehistory.list"] ?? 0;
+
+  it("com mais de 500 ativos, lê todos sem aviso e dentro do limite do Bitrix24", async () => {
+    const fake = createFakeBitrix({ now: NOW, deals: 900, enforceLimit: true });
+    vi.stubGlobal("fetch", fake.fetch);
+    const filters = periodOf(30);
+    const data = await service.getDashboard(filters, DEFAULT_SETTINGS);
+    const activeTotal = fake
+      .readableDeals()
+      .filter((d) => d.stageSemanticId === "P").length;
     expect(activeTotal).toBeGreaterThan(500);
     expect(data.activeCount).toBe(activeTotal);
-    expect(data.partial).toBe(true);
-    expect(data.warning).toContain(String(activeTotal));
+    expect(data.partial).toBe(false);
+    expect(data.warning).toBeUndefined();
     expect(fake.stats.limitErrors).toBe(0);
+    expect(fake.stats.hits).toBeLessThanOrEqual(40);
+    expectSameDashboard(data, await expectedDashboard(fake, filters));
+  });
+  it("ativo sem movimentação no período não custa histórico por negócio", async () => {
+    const fake = createFakeBitrix({ now: NOW, deals: 900, moves: () => 1 });
+    vi.stubGlobal("fetch", fake.fetch);
+    const filters = periodOf(1);
+    const data = await service.getDashboard(filters, DEFAULT_SETTINGS);
+    const activeTotal = fake
+      .readableDeals()
+      .filter((d) => d.stageSemanticId === "P").length;
+    expect(activeTotal).toBeGreaterThan(500);
+    expect(data.activeCount).toBe(activeTotal);
+    expect(data.partial).toBe(false);
+    // Só quem se moveu no último dia teve o histórico lido, não os ~600 ativos.
+    expect(historyReads(fake)).toBeLessThan(150);
+    expect(fake.stats.hits).toBeLessThanOrEqual(15);
+    expectSameDashboard(data, await expectedDashboard(fake, filters));
+  });
+  it("acima do orçamento de chamadas, detalha os mais recentes e avisa quantos", async () => {
+    vi.stubEnv("BITRIX_DASHBOARD_MAX_DEALS", "98");
+    const fake = createFakeBitrix({ now: NOW, deals: 900, enforceLimit: true });
+    vi.stubGlobal("fetch", fake.fetch);
+    const data = await service.getDashboard(periodOf(30), DEFAULT_SETTINGS);
+    const activeTotal = fake
+      .readableDeals()
+      .filter((d) => d.stageSemanticId === "P").length;
+    expect(data.partial).toBe(true);
+    expect(data.warning).toContain("Foram detalhados 98 de ");
+    // O total real de ativos continua exato; só o detalhe do período é parcial.
+    expect(data.activeCount).toBe(activeTotal);
+    expect(fake.stats.limitErrors).toBe(0);
+  });
+  it("atualizar de novo reaproveita o histórico dos ativos e relê quem mudou", async () => {
+    const fake = createFakeBitrix({ now: NOW, deals: 400 });
+    vi.stubGlobal("fetch", fake.fetch);
+    const filters = periodOf(30);
+    const first = await service.getDashboard(filters, DEFAULT_SETTINGS);
+    const firstReads = historyReads(fake);
+    const second = await service.getDashboard(filters, DEFAULT_SETTINGS);
+    const secondReads = historyReads(fake) - firstReads;
+    expect(secondReads).toBeLessThan(firstReads);
+    expect(withoutClock(second)).toEqual(withoutClock(first));
+    expectSameDashboard(second, await expectedDashboard(fake, filters));
+
+    // Um negócio ativo ganha uma movimentação nova: o cache dele não vale mais.
+    const cached = [...current.session!.dealHistory!.keys()][0];
+    const deal = fake.deals.find((d) => d.id === cached)!;
+    const next = deal.categoryId === 0 ? "EXECUTING" : "C3:WORK";
+    const at = new Date(NOW - 1000).toISOString();
+    fake.history.push({
+      ID: Math.max(...fake.history.map((h) => Number(h.ID))) + 1,
+      OWNER_ID: cached,
+      CATEGORY_ID: deal.categoryId,
+      STAGE_ID: next,
+      STAGE_SEMANTIC_ID: "P",
+      CREATED_TIME: at,
+      MOVED_BY: 1,
+    });
+    Object.assign(deal, { stageId: next, movedTime: at, movedBy: 1 });
+    const third = await service.getDashboard(filters, DEFAULT_SETTINGS);
+    expectSameDashboard(third, await expectedDashboard(fake, filters));
   });
 });
 

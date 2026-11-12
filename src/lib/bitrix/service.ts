@@ -33,6 +33,7 @@ import { getSession, type MovementRows, type Session } from "./session";
 import {
   batch,
   batchWithMeta,
+  dashboardDealBudget,
   listAll,
   listAllBatched,
   listPage,
@@ -400,13 +401,20 @@ async function readRecentHistory(
     return { rows, total: rows.length, truncated: false };
   }
 }
+// A lista dos negócios ativos é barata: 50 por página do REST, lidas em lotes
+// de 50 páginas (até 2.500 negócios por chamada contada). O histórico de cada
+// negócio é que custa caro, e esse tem orçamento próprio (dashboardDealBudget).
+const ACTIVE_LIMIT = 10000;
+// Caminhos de compatibilidade (portais sem batch) leem página por página, em
+// sequência; por isso continuam com um teto menor.
+const FALLBACK_ACTIVE_LIMIT = 500;
 async function readActiveDeals(
   session: Session,
   activeFilter: Record<string, unknown>,
 ): Promise<{ active: Deal[]; activeTotal: number; totalKnown: boolean }> {
   // Sem filtro de data aqui: negócios sem movimentação no período também podem estar parados.
-  // A visão geral não deve baixar milhares de cards de uma vez: lê até 500 e
-  // usa o total informado pelo portal para avisar quando há mais.
+  // Lê todos os ativos (até ACTIVE_LIMIT) e usa o total informado pelo
+  // portal para avisar se algum ficou de fora.
   try {
     const { items, total } = await listAllBatched<Deal>(
       session,
@@ -417,7 +425,7 @@ async function readActiveDeals(
         select: dealSelect,
         order: { id: "ASC" },
       },
-      { limit: 500, overflow: "truncate", idField: "id" },
+      { limit: ACTIVE_LIMIT, overflow: "truncate", idField: "id" },
     );
     return {
       active: normalizeDeals(items),
@@ -434,7 +442,7 @@ async function readActiveDeals(
       { entityTypeId: 2, filter: activeFilter, select: dealSelect },
       "id",
       "items",
-      500,
+      FALLBACK_ACTIVE_LIMIT,
     );
     const active = normalizeDeals(rows);
     return { active, activeTotal: active.length, totalKnown: false };
@@ -445,7 +453,7 @@ async function readActiveDeals(
         "crm.item.list",
         { entityTypeId: 2, filter: activeFilter, select: dealSelect },
         "items",
-        500,
+        FALLBACK_ACTIVE_LIMIT,
       );
       const active = normalizeDeals(rows);
       return { active, activeTotal: active.length, totalKnown: true };
@@ -462,7 +470,9 @@ async function readActiveDeals(
         "items",
         -1,
       );
-      const active = normalizeDeals(activePage.items.slice(0, 500));
+      const active = normalizeDeals(
+        activePage.items.slice(0, FALLBACK_ACTIVE_LIMIT),
+      );
       const total = Number(activePage.total);
       return {
         active,
@@ -534,6 +544,48 @@ async function readDealChunk(session: Session, chunkIds: number[]) {
     };
   }
 }
+// Histórico completo de negócios ativos, por sessão. Vale enquanto o movedTime
+// do negócio (sempre lido na lista de ativos) não mudar e nenhuma movimentação
+// mais nova que a guardada aparecer no período.
+const DEAL_HISTORY_TTL = 10 * 60000;
+const DEAL_HISTORY_MAX = 5000;
+// Limite de segurança para o total de históricos em memória numa atualização.
+const DETAIL_HISTORY_LIMIT = 50000;
+function cachedDealHistory(
+  session: Session,
+  deal: Deal,
+  latestMoveId: number | undefined,
+): HistoryEntry[] | undefined {
+  const entry = session.dealHistory?.get(deal.id);
+  if (!entry || entry.expiresAt <= Date.now() || !deal.movedTime)
+    return undefined;
+  if (Date.parse(entry.movedTime) !== Date.parse(deal.movedTime))
+    return undefined;
+  if (latestMoveId !== undefined && entry.lastId < latestMoveId)
+    return undefined;
+  return entry.rows;
+}
+function rememberDealHistory(
+  session: Session,
+  deal: Deal,
+  rows: HistoryEntry[],
+) {
+  if (!deal.movedTime || !rows.length) return;
+  const cache = (session.dealHistory ??= new Map());
+  cache.delete(deal.id);
+  cache.set(deal.id, {
+    movedTime: deal.movedTime,
+    lastId: Math.max(...rows.map((row) => row.ID)),
+    expiresAt: Date.now() + DEAL_HISTORY_TTL,
+    rows,
+  });
+  // O Map mantém a ordem de inserção: descarta os mais antigos.
+  while (cache.size > DEAL_HISTORY_MAX) {
+    const oldest = cache.keys().next().value;
+    if (oldest === undefined) break;
+    cache.delete(oldest);
+  }
+}
 export async function getDashboard(filters: Filters, settings: Settings) {
   const now = Date.now();
   if (isDemo()) {
@@ -583,31 +635,57 @@ export async function getDashboard(filters: Filters, settings: Settings) {
       (!filters.stage || entry.STAGE_ID === filters.stage),
   );
   const { active, activeTotal, totalKnown } = activeResult;
-  const ids = [
-    ...new Set([...recent.map((h) => h.OWNER_ID), ...active.map((d) => d.id)]),
-  ];
-  const queryLimit = 500;
-  const limitedIds = ids.slice(0, queryLimit);
-  const partial =
-    ids.length > queryLimit ||
-    activeTotal > active.length ||
-    (!totalKnown && active.length >= 500) ||
-    recentResult.truncated;
+  // Só quem se moveu no período precisa do histórico de cada negócio (a
+  // duração de cada passagem depende da movimentação seguinte). Negócio ativo
+  // sem movimentação no período entra em "em andamento" e "parados" pelo
+  // movedTime, que já veio na lista, sem nenhuma chamada extra.
+  const latestMove = new Map<number, number>();
+  // `recent` vem do mais novo para o mais antigo: a ordem de inserção prioriza
+  // os negócios mais recentes se o orçamento não der para todos.
+  for (const entry of recent)
+    latestMove.set(
+      entry.OWNER_ID,
+      Math.max(latestMove.get(entry.OWNER_ID) ?? 0, entry.ID),
+    );
+  const owners = [...latestMove.keys()];
+  const activeById = new Map(active.map((deal) => [deal.id, deal]));
+  const history: HistoryEntry[] = [];
+  const toFetch: number[] = [];
+  for (const id of owners) {
+    const deal = activeById.get(id);
+    const cached = deal && cachedDealHistory(session, deal, latestMove.get(id));
+    if (cached) history.push(...cached);
+    else toFetch.push(id);
+  }
+  // Orçamento de chamadas (ver dashboardDealBudget): acima dele, os negócios
+  // mais antigos do período ficam de fora e o painel avisa.
+  const limitedIds = toFetch.slice(0, dashboardDealBudget());
+  const skipped = toFetch.length - limitedIds.length;
   const chunks: number[][] = [];
   // 49 negócios por grupo: 1 lista + 49 históricos = 50 subcomandos por lote.
   for (let i = 0; i < limitedIds.length; i += 49)
     chunks.push(limitedIds.slice(i, i + 49));
-  const deals: Deal[] = [];
-  const history: HistoryEntry[] = [];
+  const dealsById = new Map<number, Deal>(activeById);
   // Até 6 grupos ao mesmo tempo; o limitador do portal segura o ritmo se o
   // balde encher.
   for (const result of await mapLimit(chunks, 6, (chunk) =>
     readDealChunk(session, chunk),
   )) {
-    deals.push(...result.deals);
+    const byOwner = new Map<number, HistoryEntry[]>();
+    for (const entry of result.history) {
+      const rows = byOwner.get(entry.OWNER_ID);
+      if (rows) rows.push(entry);
+      else byOwner.set(entry.OWNER_ID, [entry]);
+    }
+    for (const deal of result.deals) {
+      dealsById.set(deal.id, deal);
+      if (activeById.has(deal.id))
+        rememberDealHistory(session, deal, byOwner.get(deal.id) ?? []);
+    }
     history.push(...result.history);
   }
-  if (history.length > 10000)
+  const deals = [...dealsById.values()];
+  if (history.length > DETAIL_HISTORY_LIMIT)
     throw new BitrixError(
       "QUERY_TOO_LARGE",
       "Histórico muito extenso para este MVP. Selecione um pipeline ou reduza o período.",
@@ -624,14 +702,30 @@ export async function getDashboard(filters: Filters, settings: Settings) {
     false,
     session.domain,
   );
+  const reasons: string[] = [];
+  if (recentResult.truncated)
+    reasons.push(
+      `O período tem ${recentResult.total} movimentações; esta atualização analisou as ${recentRows.length} mais recentes.`,
+    );
+  if (skipped > 0)
+    reasons.push(
+      `Foram detalhados ${owners.length - skipped} de ${owners.length} negócios com movimentação no período (os mais recentes primeiro).`,
+    );
+  if (activeTotal > active.length)
+    reasons.push(
+      `A consulta analisou ${active.length} dos ${activeTotal} negócios em andamento.`,
+    );
+  else if (!totalKnown && active.length >= FALLBACK_ACTIVE_LIMIT)
+    reasons.push(
+      `A consulta analisou ${active.length} negócios em andamento; pode haver mais.`,
+    );
+  const partial = reasons.length > 0;
   return {
     ...result,
     activeCount: activeTotal,
     partial,
     warning: partial
-      ? recentResult.truncated
-        ? `O período tem ${recentResult.total} movimentações; esta atualização analisou as ${recentRows.length} mais recentes e ${limitedIds.length} negócios. Selecione um pipeline ou reduza o período para detalhar todos.`
-        : `A consulta analisou ${limitedIds.length} negócios nesta atualização. O portal possui ${activeTotal} negócios em andamento; selecione um pipeline ou reduza o período para detalhar todos.`
+      ? `${reasons.join(" ")} Selecione um pipeline ou reduza o período para detalhar todos.`
       : undefined,
   };
 }

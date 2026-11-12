@@ -29,6 +29,19 @@ function rateConfig() {
     perSecond: Number.isFinite(perSecond) && perSecond > 0 ? perSecond : 2,
   };
 }
+/**
+ * Quantos negócios o painel completo detalha (histórico de cada um) numa
+ * atualização. Cada grupo de 49 negócios é 1 chamada contada; deixa 10
+ * chamadas da rajada livres para a primeira página das listas, os nomes de
+ * usuários e outros apps do portal. Com os padrões (rajada 40) são 1.470
+ * negócios sem nenhuma espera. Ajustável por BITRIX_DASHBOARD_MAX_DEALS.
+ */
+export function dashboardDealBudget() {
+  const configured = Number(process.env.BITRIX_DASHBOARD_MAX_DEALS);
+  if (Number.isFinite(configured) && configured >= 49)
+    return Math.floor(configured);
+  return Math.max(1, Math.floor(rateConfig().burst) - 10) * 49;
+}
 function drain(domain: string, now: number) {
   const { perSecond } = rateConfig();
   const bucket = buckets.get(domain) ?? { level: 0, at: now };

@@ -40,7 +40,17 @@ export interface Session {
   // paginar Movimentações sem refazer a leitura a cada página.
   movementRows?: MovementRows;
   movementRowsPending?: { key: string; promise: Promise<MovementRows> };
+  // Histórico completo de negócios ativos já lido, guardado com o movedTime do
+  // negócio no momento da leitura. Enquanto o movedTime não muda, atualizar o
+  // painel não precisa reler o histórico desse negócio.
+  dealHistory?: Map<number, DealHistoryCache>;
   refreshPending?: Promise<void>;
+}
+export interface DealHistoryCache {
+  movedTime: string;
+  lastId: number;
+  expiresAt: number;
+  rows: HistoryEntry[];
 }
 // Uma instância Node, sem persistência. Reinícios exigem reabrir o app no portal.
 const globalSessions = globalThis as unknown as {
