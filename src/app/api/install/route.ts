@@ -25,7 +25,24 @@ export async function POST(request: Request) {
     const current = unwrap<{ placement: string; handler: string }>(
       (await rest(session, "placement.get")).result,
     );
-    for (const placement of ["CRM_ANALYTICS_MENU", "CRM_DEAL_DETAIL_TAB"]) {
+    const placements = ["CRM_ANALYTICS_MENU", "CRM_DEAL_DETAIL_TAB"];
+    // Remove bindings antigos deste app (handler de outra URL, p.ex. ngrok
+    // anterior) para não ficarem abas duplicadas apontando para URL morta.
+    let removed = 0;
+    for (const p of current) {
+      if (placements.includes(p.placement) && p.handler !== handler) {
+        try {
+          await rest(session, "placement.unbind", {
+            PLACEMENT: p.placement,
+            HANDLER: p.handler,
+          });
+          removed++;
+        } catch {
+          // Falha ao remover um binding antigo não impede o registro novo.
+        }
+      }
+    }
+    for (const placement of placements) {
       if (
         !current.some((p) => p.placement === placement && p.handler === handler)
       )
@@ -43,7 +60,8 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({
       ok: true,
-      placements: ["CRM_ANALYTICS_MENU", "CRM_DEAL_DETAIL_TAB"],
+      placements,
+      removed,
     });
   } catch (error) {
     return errorResponse(error);

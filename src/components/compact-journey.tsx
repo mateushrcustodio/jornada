@@ -2,7 +2,7 @@
 import { ArrowLeft, ArrowUpRight, Clock3, RefreshCw } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import type { JourneyData, Stage } from "@/lib/types";
+import type { JourneyData, Stage, Visit } from "@/lib/types";
 import { dateTime, duration } from "@/lib/format";
 import { isClosed, resolveStage } from "@/lib/calculations";
 import { useResource } from "./use-resource";
@@ -17,6 +17,43 @@ function futureStages(data: JourneyData, current: Stage) {
         stage.categoryId === current.categoryId && stage.sort > current.sort,
     )
     .sort((a, b) => a.sort - b.sort);
+}
+
+// Agrupa as etapas em sequência pelo funil: o nome do funil aparece uma vez
+// e só volta a aparecer quando o negócio muda para outro funil.
+interface TimelineGroup {
+  categoryId: number;
+  visits: Visit[];
+  pending: Stage[];
+}
+
+function groupByPipeline(visits: Visit[], future: Stage[]) {
+  const groups: TimelineGroup[] = [];
+  for (const visit of visits) {
+    const last = groups[groups.length - 1];
+    if (last && last.categoryId === visit.stage.categoryId) {
+      last.visits.push(visit);
+    } else {
+      groups.push({
+        categoryId: visit.stage.categoryId,
+        visits: [visit],
+        pending: [],
+      });
+    }
+  }
+  if (future.length) {
+    const last = groups[groups.length - 1];
+    if (last && last.categoryId === future[0].categoryId) {
+      last.pending.push(...future);
+    } else {
+      groups.push({
+        categoryId: future[0].categoryId,
+        visits: [],
+        pending: [...future],
+      });
+    }
+  }
+  return groups;
 }
 
 export function CompactJourney({
@@ -64,6 +101,7 @@ export function CompactJourney({
     `Pipeline #${categoryId}`;
   const max = Math.max(1, ...data.visits.map((v) => v.duration));
   const future = closed ? [] : futureStages(data, currentStage);
+  const groups = groupByPipeline(data.visits, future);
   return (
     <div className="journey">
       {back}
@@ -158,73 +196,75 @@ export function CompactJourney({
       ) : (
         <Panel title="Etapas do negócio" className="timeline-panel">
           <ol className="timeline">
-            {data.visits.map((visit) => (
+            {groups.map((group, index) => (
               <li
-                key={visit.entry.ID}
-                className={`timeline-item ${visit.current ? "current" : ""}`}
+                key={`${index}-${group.categoryId}`}
+                className="timeline-group"
               >
-                <span
-                  className="timeline-node"
-                  aria-hidden="true"
-                  style={
-                    {
-                      "--stage-color": visit.stage.color,
-                    } as React.CSSProperties
-                  }
-                />
-                <div className="timeline-card">
-                  <div>
-                    <h3>
-                      {visit.stage.name}
-                      <span className="timeline-pipeline">
-                        {pipelineName(visit.stage.categoryId)}
-                      </span>
-                    </h3>
-                    <div className="timeline-meta">
-                      <span>
-                        <time dateTime={visit.entry.CREATED_TIME}>
-                          {dateTime(visit.entry.CREATED_TIME)}
-                        </time>
-                      </span>
-                      <span>
-                        {visit.actor
-                          ? `Movido por ${visit.actor}`
-                          : "Movimentação por automação"}
-                      </span>
-                    </div>
-                  </div>
-                  <div className="timeline-side">
-                    {visit.current && (
-                      <span className="current-label">
-                        {closed ? "Etapa final" : "Você está aqui"}
-                      </span>
-                    )}
-                    <span
-                      className="time-pill"
-                      title={
-                        visit.current && !closed
-                          ? "Tempo nesta etapa até a consulta"
-                          : "Tempo de permanência"
-                      }
+                <h3 className="timeline-group-title">
+                  {pipelineName(group.categoryId)}
+                </h3>
+                <ol className="timeline-steps">
+                  {group.visits.map((visit) => (
+                    <li
+                      key={visit.entry.ID}
+                      className={`timeline-item ${visit.current ? "current" : ""}`}
                     >
-                      {duration(visit.duration)}
-                    </span>
-                  </div>
-                </div>
-              </li>
-            ))}
-            {future.map((stage) => (
-              <li className="timeline-pending" key={`future-${stage.id}`}>
-                <span className="timeline-node" aria-hidden="true" />
-                <div className="timeline-card">
-                  <h3>
-                    {stage.name}
-                    <span className="timeline-pipeline">
-                      {pipelineName(stage.categoryId)}
-                    </span>
-                  </h3>
-                  <span className="pending-label">Pendente</span>
-                </div>
+                      <span
+                        className="timeline-node"
+                        aria-hidden="true"
+                        style={
+                          {
+                            "--stage-color": visit.stage.color,
+                          } as React.CSSProperties
+                        }
+                      />
+                      <div className="timeline-card">
+                        <div>
+                          <h4>{visit.stage.name}</h4>
+                          <div className="timeline-meta">
+                            <span>
+                              <time dateTime={visit.entry.CREATED_TIME}>
+                                {dateTime(visit.entry.CREATED_TIME)}
+                              </time>
+                            </span>
+                            <span>
+                              {visit.actor
+                                ? `Movido por ${visit.actor}`
+                                : "Movimentação por automação"}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="timeline-side">
+                          {visit.current && (
+                            <span className="current-label">
+                              {closed ? "Etapa final" : "Você está aqui"}
+                            </span>
+                          )}
+                          <span
+                            className="time-pill"
+                            title={
+                              visit.current && !closed
+                                ? "Tempo nesta etapa até a consulta"
+                                : "Tempo de permanência"
+                            }
+                          >
+                            {duration(visit.duration)}
+                          </span>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                  {group.pending.map((stage) => (
+                    <li className="timeline-pending" key={`future-${stage.id}`}>
+                      <span className="timeline-node" aria-hidden="true" />
+                      <div className="timeline-card">
+                        <h4>{stage.name}</h4>
+                        <span className="pending-label">Pendente</span>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
               </li>
             ))}
           </ol>
