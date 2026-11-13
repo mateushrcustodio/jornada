@@ -566,3 +566,41 @@ test("Movimentações: arrastar pelo texto do título funciona e um clique não 
     "Pessoa responsável",
   ]);
 });
+test("etapas mostram o tempo médio no funil e a análise detalhada", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/dashboard/stages");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  const panel = page.locator(".stage-time-panel");
+  await expect(
+    panel.getByRole("heading", { name: "Tempo médio no funil" }),
+  ).toBeVisible();
+  await expect(panel.locator(".stage-column").first()).toBeVisible();
+  await expect(panel).toContainText("segura os negócios por mais tempo");
+  await panel.getByRole("button", { name: "Ver mais detalhes" }).click();
+  const dialog = page.getByRole("dialog", { name: "Tempo médio por etapa" });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByText("Faturamento em análise")).toBeVisible();
+  await expect(dialog.getByText("Responsáveis no funil")).toBeVisible();
+  await expect(dialog.getByText("Mariana Silva").first()).toBeVisible();
+  // Clicar numa etapa troca o detalhamento.
+  await dialog.locator(".range-row").first().click();
+  await expect(dialog.locator(".range-row").first()).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
+  await expect(
+    dialog.getByText("Negócios que mais demoraram nesta etapa"),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(() => {
+      const body = document.querySelector(".insight-body")!;
+      return body.scrollWidth <= body.clientWidth;
+    }),
+  ).toBe(true);
+  await page.screenshot({
+    path: `docs/screenshots/stages-details-${testInfo.project.name}.png`,
+  });
+  await page.keyboard.press("Escape");
+  await expect(dialog).toBeHidden();
+});
