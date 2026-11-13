@@ -1,34 +1,51 @@
 "use client";
 import {
+  ArrowDown,
   ArrowRight,
+  ArrowUp,
+  ArrowUpDown,
   ArrowUpRight,
   CalendarDays,
+  CircleDollarSign,
   Clock3,
+  GripVertical,
   Layers3,
   Pause,
   RefreshCw,
   Route,
   Settings2,
   Timer,
+  UserRound,
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import type {
   DashboardData,
   Catalog,
   Deal,
   Filters,
   Movement,
+  MovementSort,
   PageData,
   Period,
   Pipeline,
   Retention,
+  SortDirection,
   StalledDeal,
+  UserOption,
   View,
 } from "@/lib/types";
 import { PAGE_SIZE } from "@/lib/types";
-import { dateTime, duration, periodRange } from "@/lib/format";
+import {
+  dateTime,
+  duration,
+  money,
+  parseMoney,
+  periodRange,
+} from "@/lib/format";
+import { useColumnOrder } from "./column-order";
 import { useApp } from "./provider";
 import { useResource } from "./use-resource";
 import {
@@ -85,8 +102,28 @@ export function Dashboard({ view }: { view: View }) {
   );
   const [pipeline, setPipeline] = useSticky("pipeline", () => "");
   const [stage, setStage] = useSticky("stage", () => "");
+  const [assigned, setAssigned] = useSticky("assigned", () => "");
+  const [oppMin, setOppMin] = useSticky("oppMin", () => "");
+  const [oppMax, setOppMax] = useSticky("oppMax", () => "");
+  // Ordenação das Movimentações pelo faturamento: sem clique, vale a ordem por data.
+  const [sort, setSort] = useSticky<SortDirection | "">("sort", () => "");
   const [from, setFrom] = useSticky("from", () => "");
   const [to, setTo] = useSticky("to", () => "");
+  const usersResource = useResource<UserOption[]>(
+    "/api/users",
+    undefined,
+    ready,
+    DASHBOARD_CACHE_MS,
+  );
+  const users = usersResource.data ?? [];
+  const minValue = parseMoney(oppMin);
+  const maxValue = parseMoney(oppMax);
+  const rangeError =
+    minValue === null || maxValue === null
+      ? "Digite o faturamento só com números, por exemplo 10000 ou 10.000,50."
+      : minValue !== undefined && maxValue !== undefined && minValue > maxValue
+        ? "O faturamento mínimo não pode ser maior que o máximo."
+        : undefined;
   const effectivePeriod = period ?? settings.defaultPeriod;
   const validCustom =
     effectivePeriod !== "custom" ||
@@ -112,13 +149,18 @@ export function Dashboard({ view }: { view: View }) {
         ...range,
         pipeline: pipeline ? Number(pipeline) : undefined,
         stage: stage || undefined,
+        assignedById: assigned ? Number(assigned) : undefined,
+        opportunityMin: minValue ?? undefined,
+        opportunityMax: maxValue ?? undefined,
       }
     : undefined;
   const body = JSON.stringify({ filters, settings });
   // Movimentações e Parados só buscam o total e a página aberta; a visão geral
   // e as etapas precisam de todos os dados para calcular médias e contagens.
   const paged = view === "movements" || view === "stalled";
-  const canQuery = ready && validCustom && requested;
+  const canQuery = ready && validCustom && !rangeError && requested;
+  const sortBody: MovementSort | undefined =
+    view === "movements" && sort ? { by: "opportunity", dir: sort } : undefined;
   const resource = useResource<DashboardData>(
     "/api/dashboard",
     body,
@@ -128,12 +170,19 @@ export function Dashboard({ view }: { view: View }) {
   const data = resource.data;
   // A página volta para a primeira ao mudar de aba, filtro, configuração ou
   // ao atualizar; a assinatura evita um efeito só para zerar o contador.
-  const pageSignature = `${view}\n${body}\n${clock}`;
+  const pageSignature = `${view}\n${body}\n${clock}\n${sort}`;
   const [pageState, setPageState] = useState({ signature: "", page: 1 });
   const page = pageState.signature === pageSignature ? pageState.page : 1;
   const pageResource = useResource<PageData<Movement> | PageData<StalledDeal>>(
     "/api/dashboard/page",
-    JSON.stringify({ filters, settings, kind: view, page, asOf: clock }),
+    JSON.stringify({
+      filters,
+      settings,
+      kind: view,
+      page,
+      asOf: clock,
+      sort: sortBody,
+    }),
     canQuery && paged,
     DASHBOARD_CACHE_MS,
   );
@@ -152,7 +201,13 @@ export function Dashboard({ view }: { view: View }) {
     active.refresh();
   }
   const hasFilters =
-    !!pipeline || !!stage || effectivePeriod !== settings.defaultPeriod;
+    !!pipeline ||
+    !!stage ||
+    !!assigned ||
+    !!oppMin ||
+    !!oppMax ||
+    !!sort ||
+    effectivePeriod !== settings.defaultPeriod;
   return (
     <>
       <div className="page-heading">
@@ -171,7 +226,12 @@ export function Dashboard({ view }: { view: View }) {
           <button
             className="button primary"
             onClick={refresh}
-            disabled={(requested && active.loading) || !validCustom || !catalog}
+            disabled={
+              (requested && active.loading) ||
+              !validCustom ||
+              !!rangeError ||
+              !catalog
+            }
           >
             <RefreshCw
               size={16}
@@ -250,12 +310,52 @@ export function Dashboard({ view }: { view: View }) {
               ))}
           </select>
         </label>
+        <label className="filter">
+          <UserRound size={16} />
+          <span className="sr-only">Responsável</span>
+          <select
+            aria-label="Responsável"
+            value={assigned}
+            disabled={!users.length && !assigned}
+            onChange={(e) => setAssigned(e.target.value)}
+          >
+            <option value="">
+              {usersResource.loading
+                ? "Carregando pessoas…"
+                : !users.length
+                  ? "Responsáveis indisponíveis"
+                  : "Todos os responsáveis"}
+            </option>
+            {users.map((user) => (
+              <option key={user.id} value={user.id}>
+                {user.name}
+              </option>
+            ))}
+            {assigned &&
+              !users.some((user) => String(user.id) === assigned) && (
+                <option value={assigned}>Usuário #{assigned}</option>
+              )}
+          </select>
+        </label>
+        <RevenueFilter
+          min={oppMin}
+          max={oppMax}
+          invalid={!!rangeError}
+          onChange={(nextMin, nextMax) => {
+            setOppMin(nextMin);
+            setOppMax(nextMax);
+          }}
+        />
         {hasFilters && (
           <button
             className="text-button"
             onClick={() => {
               setPipeline("");
               setStage("");
+              setAssigned("");
+              setOppMin("");
+              setOppMax("");
+              setSort("");
               setPeriod(settings.defaultPeriod);
               setFrom("");
               setTo("");
@@ -297,7 +397,11 @@ export function Dashboard({ view }: { view: View }) {
           nas configurações.
         </p>
       )}
-      {!validCustom ? (
+      {rangeError ? (
+        <div className="dashboard-body">
+          <Empty title="Revise o faturamento" description={rangeError} />
+        </div>
+      ) : !validCustom ? (
         <div className="dashboard-body">
           <Empty
             title="Escolha um período"
@@ -354,6 +458,11 @@ export function Dashboard({ view }: { view: View }) {
                 rows={(pageResource.data as PageData<Movement>).rows}
                 pipelines={catalog?.pipelines ?? []}
                 paging={paging(pageResource.data)}
+                sorting={{
+                  dir: sort,
+                  // Primeiro clique: do maior para o menor; depois alterna.
+                  onToggle: () => setSort(sort === "desc" ? "asc" : "desc"),
+                }}
               />
             )}
             {view === "stalled" && (
@@ -637,18 +746,139 @@ interface Paging {
   onChange: (page: number) => void;
 }
 
+// Filtro de faturamento (valor do negócio): faixa com mínimo e máximo. O texto
+// só vira filtro depois de uma pausa na digitação, para não consultar o
+// Bitrix24 a cada tecla.
+function RevenueFilter({
+  min,
+  max,
+  invalid,
+  onChange,
+}: {
+  min: string;
+  max: string;
+  invalid: boolean;
+  onChange: (min: string, max: string) => void;
+}) {
+  const [text, setText] = useState({ min, max });
+  // "Limpar" (ou outra aba) muda os valores de fora: o texto acompanha.
+  useEffect(() => {
+    queueMicrotask(() =>
+      setText((current) =>
+        current.min === min && current.max === max ? current : { min, max },
+      ),
+    );
+  }, [min, max]);
+  useEffect(() => {
+    if (text.min === min && text.max === max) return;
+    const timer = setTimeout(() => onChange(text.min, text.max), 600);
+    return () => clearTimeout(timer);
+  }, [text, min, max, onChange]);
+  const commit = () => onChange(text.min, text.max);
+  const field = (key: "min" | "max", label: string, placeholder: string) => (
+    <input
+      type="text"
+      inputMode="decimal"
+      autoComplete="off"
+      aria-label={label}
+      aria-invalid={invalid || undefined}
+      placeholder={placeholder}
+      value={text[key]}
+      onChange={(e) => setText({ ...text, [key]: e.target.value })}
+      onBlur={commit}
+      onKeyDown={(e) => e.key === "Enter" && commit()}
+    />
+  );
+  return (
+    <div
+      className={`filter filter-range ${invalid ? "is-invalid" : ""}`}
+      role="group"
+      aria-label="Faturamento"
+    >
+      <CircleDollarSign size={16} />
+      <span>Faturamento</span>
+      {field("min", "Faturamento mínimo", "Mín. R$")}
+      <span aria-hidden>–</span>
+      {field("max", "Faturamento máximo", "Máx. R$")}
+    </div>
+  );
+}
+
+// Colunas da tabela de Movimentações. A ordem padrão é a do array; o usuário
+// pode arrastar os títulos para reorganizar (a ordem fica salva no navegador).
+type MovementColumn =
+  "deal" | "pipeline" | "movement" | "when" | "actor" | "assignee" | "revenue";
+const MOVEMENT_COLUMNS: readonly MovementColumn[] = [
+  "deal",
+  "pipeline",
+  "movement",
+  "when",
+  "actor",
+  "assignee",
+  "revenue",
+];
+const COLUMN_LABELS: Record<MovementColumn, string> = {
+  deal: "Negócio",
+  pipeline: "Pipeline",
+  movement: "Movimentação",
+  when: "Quando",
+  actor: "Movido por",
+  assignee: "Pessoa responsável",
+  revenue: "Faturamento",
+};
+const COLUMN_ORDER_KEY = "jornada-crm.movement-columns.v1";
+
+// Tempo do deslize final da coluna até a casa de destino (ver globals.css).
+const SETTLE_MS = 200;
+interface ColumnGesture {
+  key: MovementColumn;
+  index: number;
+  pointerId: number;
+  startX: number;
+  lefts: number[];
+  widths: number[];
+  target: number;
+  active: boolean;
+  cells: HTMLElement[];
+  dx: number;
+  frame: number;
+}
+
+interface Sorting {
+  dir: SortDirection | "";
+  onToggle: () => void;
+}
+
 function Movements({
   rows,
   pipelines,
   compact = false,
   paging,
+  sorting,
 }: {
   rows: Movement[];
   pipelines: Pipeline[];
   compact?: boolean;
   paging?: Paging;
+  sorting?: Sorting;
 }) {
   const [requestedPage, setLocalPage] = useState(1);
+  const columns = useColumnOrder(COLUMN_ORDER_KEY, MOVEMENT_COLUMNS);
+  const tableRef = useRef<HTMLTableElement>(null);
+  // Arraste de coluna: a coluna acompanha o ponteiro (transform direto nas
+  // células dela, uma vez por quadro) e as vizinhas deslizam para abrir espaço.
+  // Só a troca de posição atualiza o React.
+  const gesture = useRef<ColumnGesture | null>(null);
+  const settleTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  );
+  const [drag, setDrag] = useState<{
+    key: MovementColumn;
+    from: number;
+    target: number;
+    width: number;
+  } | null>(null);
+  useEffect(() => () => clearTimeout(settleTimer.current), []);
   // Com `paging`, as linhas já são só as da página atual (buscadas sob demanda).
   const size = paging ? paging.size : compact ? 5 : 10;
   const total = paging ? paging.total : rows.length;
@@ -657,6 +887,202 @@ function Movements({
     : Math.min(requestedPage, Math.max(1, Math.ceil(rows.length / size)));
   const visible = paging ? rows : rows.slice((page - 1) * size, page * size);
   const setPage = paging ? paging.onChange : setLocalPage;
+  const customOrder =
+    columns.order.join() !== MOVEMENT_COLUMNS.join()
+      ? columns.reset
+      : undefined;
+
+  function startDrag(
+    event: React.PointerEvent<HTMLElement>,
+    key: MovementColumn,
+  ) {
+    const table = tableRef.current;
+    const target = event.target as HTMLElement;
+    if (!table || drag || event.button !== 0 || target.closest(".sort-button"))
+      return;
+    // Mouse arrasta pelo título inteiro; toque e caneta só pela alça, para a
+    // tabela continuar rolando com o dedo.
+    if (event.pointerType !== "mouse" && !target.closest(".col-grip")) return;
+    const heads = [
+      ...table.querySelectorAll<HTMLElement>("thead th[data-column]"),
+    ].map((head) => head.getBoundingClientRect());
+    event.currentTarget.setPointerCapture(event.pointerId);
+    gesture.current = {
+      key,
+      index: columns.order.indexOf(key),
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      lefts: heads.map((rect) => rect.left),
+      widths: heads.map((rect) => rect.width),
+      target: columns.order.indexOf(key),
+      active: false,
+      cells: [],
+      dx: 0,
+      frame: 0,
+    };
+  }
+  function moveDrag(event: React.PointerEvent<HTMLElement>) {
+    const g = gesture.current;
+    const table = tableRef.current;
+    if (!g || !table || event.pointerId !== g.pointerId) return;
+    const raw = event.clientX - g.startX;
+    if (!g.active) {
+      // Pequena folga para um clique no título não virar arraste.
+      if (Math.abs(raw) < 4) return;
+      g.active = true;
+      // As células da coluna são movidas direto: sem passar pelo React e sem
+      // variável CSS no ancestral (que refaria o estilo da tabela inteira).
+      g.cells = [
+        ...table.querySelectorAll<HTMLElement>(`[data-column="${g.key}"]`),
+      ];
+      for (const cell of g.cells) cell.style.transition = "none";
+      setDrag({
+        key: g.key,
+        from: g.index,
+        target: g.index,
+        width: g.widths[g.index],
+      });
+    }
+    const last = g.lefts.length - 1;
+    const min = g.lefts[0] - g.lefts[g.index];
+    const max =
+      g.lefts[last] + g.widths[last] - (g.lefts[g.index] + g.widths[g.index]);
+    g.dx = Math.min(max, Math.max(min, raw));
+    // No máximo uma atualização visual por quadro, mesmo com mouse de 1000 Hz.
+    if (!g.frame)
+      g.frame = requestAnimationFrame(() => {
+        g.frame = 0;
+        for (const cell of g.cells)
+          cell.style.transform = `translate3d(${g.dx}px, 0, 0)`;
+      });
+    // A coluna ocupa o lugar sobre o qual está o seu centro.
+    const center = g.lefts[g.index] + g.widths[g.index] / 2 + g.dx;
+    let target = last;
+    for (let i = 0; i < last; i += 1)
+      if (center < g.lefts[i] + g.widths[i]) {
+        target = i;
+        break;
+      }
+    if (target !== g.target) {
+      g.target = target;
+      setDrag((current) => current && { ...current, target });
+    }
+  }
+  function releaseCells(g: ColumnGesture) {
+    for (const cell of g.cells) {
+      cell.style.transition = "";
+      cell.style.transform = "";
+    }
+  }
+  function endDrag(event: React.PointerEvent<HTMLElement>) {
+    const g = gesture.current;
+    if (!g || event.pointerId !== g.pointerId) return;
+    gesture.current = null;
+    if (!g.active) return;
+    cancelAnimationFrame(g.frame);
+    // A coluna desliza até a casa de destino e só então a ordem é gravada: as
+    // posições já coincidem, então não há salto na troca.
+    let offset = 0;
+    for (let i = g.index + 1; i <= g.target; i += 1) offset += g.widths[i];
+    for (let i = g.target; i < g.index; i += 1) offset -= g.widths[i];
+    const animate = !window.matchMedia("(prefers-reduced-motion: reduce)")
+      .matches;
+    for (const cell of g.cells) {
+      cell.style.transition = animate
+        ? `transform ${SETTLE_MS}ms cubic-bezier(0.2, 0.8, 0.2, 1)`
+        : "none";
+      cell.style.transform = `translate3d(${offset}px, 0, 0)`;
+    }
+    settleTimer.current = setTimeout(
+      () => {
+        flushSync(() => {
+          if (g.target !== g.index)
+            columns.move(g.key, columns.order[g.target]);
+          setDrag(null);
+        });
+        releaseCells(g);
+      },
+      animate ? SETTLE_MS : 0,
+    );
+  }
+  function cancelDrag() {
+    const g = gesture.current;
+    gesture.current = null;
+    if (g) {
+      cancelAnimationFrame(g.frame);
+      releaseCells(g);
+    }
+    setDrag(null);
+  }
+  // Classe e deslocamento de cada célula (cabeçalho e linhas) da coluna.
+  function dragProps(key: MovementColumn, index: number) {
+    if (!drag) return { className: "" };
+    if (key === drag.key) return { className: "is-dragging col-dragged" };
+    const shift =
+      index > drag.from && index <= drag.target
+        ? -drag.width
+        : index < drag.from && index >= drag.target
+          ? drag.width
+          : 0;
+    return {
+      className: "col-shift",
+      style: { transform: `translate3d(${shift}px, 0, 0)` },
+    };
+  }
+  function keyboardMove(
+    event: React.KeyboardEvent<HTMLButtonElement>,
+    key: MovementColumn,
+  ) {
+    const step =
+      event.key === "ArrowLeft" ? -1 : event.key === "ArrowRight" ? 1 : 0;
+    if (!step) return;
+    event.preventDefault();
+    const target = columns.order[columns.order.indexOf(key) + step];
+    if (target) columns.move(key, target);
+  }
+
+  const cell: Record<MovementColumn, (row: Movement) => React.ReactNode> = {
+    deal: (row) => (
+      <DealLink id={row.deal.id} title={row.deal.title} url={row.url} />
+    ),
+    pipeline: (row) => (
+      <span className="pipeline-label">
+        {pipelines.find((p) => p.id === row.entry.CATEGORY_ID)?.name ||
+          `Pipeline #${row.entry.CATEGORY_ID}`}
+      </span>
+    ),
+    movement: (row) => (
+      <div className="movement-stages">
+        {row.previousStage ? (
+          <>
+            <StageBadge stage={row.previousStage} />
+            <ArrowRight size={12} />
+          </>
+        ) : (
+          <span>Primeira entrada</span>
+        )}
+        <StageBadge stage={row.stage} />
+      </div>
+    ),
+    when: (row) => dateTime(row.entry.CREATED_TIME),
+    actor: (row) => row.actor || "Não informado pela API",
+    assignee: (row) =>
+      row.deal.assignedByName ||
+      (row.deal.assignedById
+        ? `Usuário #${row.deal.assignedById}`
+        : "Não informado"),
+    revenue: (row) => (
+      <strong className="money">
+        {money(row.deal.opportunity, row.deal.currencyId)}
+      </strong>
+    ),
+  };
+  const cellClass: Partial<Record<MovementColumn, string>> = {
+    when: "date-cell",
+    actor: "actor-cell",
+    assignee: "actor-cell",
+    revenue: "num-cell",
+  };
   return (
     <Panel
       title="Últimas movimentações"
@@ -668,7 +1094,14 @@ function Movements({
             <ArrowRight size={14} />
           </Link>
         ) : (
-          <span className="count-badge">{total} registros</span>
+          <span className="panel-actions">
+            {customOrder && (
+              <button className="text-button" onClick={customOrder}>
+                Restaurar colunas
+              </button>
+            )}
+            <span className="count-badge">{total} registros</span>
+          </span>
         )
       }
     >
@@ -706,51 +1139,97 @@ function Movements({
       ) : (
         <>
           <div className={`table-scroll ${paging?.busy ? "is-busy" : ""}`}>
-            <table>
+            <table
+              ref={tableRef}
+              className={drag ? "is-reordering" : undefined}
+            >
               <thead>
                 <tr>
-                  <th>Negócio</th>
-                  <th>Pipeline</th>
-                  <th>Movimentação</th>
-                  <th>Quando</th>
-                  <th>Movido por</th>
+                  {columns.order.map((key, index) => {
+                    const label = COLUMN_LABELS[key];
+                    const sortable = key === "revenue" && sorting;
+                    const moving = dragProps(key, index);
+                    return (
+                      <th
+                        key={key}
+                        data-column={key}
+                        className={`${moving.className} ${key === "revenue" ? "num-cell" : ""}`}
+                        style={moving.style}
+                        onPointerDown={(e) => startDrag(e, key)}
+                        onPointerMove={moveDrag}
+                        onPointerUp={endDrag}
+                        onPointerCancel={cancelDrag}
+                        aria-sort={
+                          sortable
+                            ? sorting.dir === "desc"
+                              ? "descending"
+                              : sorting.dir === "asc"
+                                ? "ascending"
+                                : "none"
+                            : undefined
+                        }
+                      >
+                        <div className="th-inner">
+                          <button
+                            type="button"
+                            className="col-grip"
+                            aria-label={`Mover coluna ${label}`}
+                            title="Arraste para reordenar (ou use as setas ← →)"
+                            data-index={index}
+                            onKeyDown={(e) => keyboardMove(e, key)}
+                          >
+                            <GripVertical size={14} />
+                          </button>
+                          <span>{label}</span>
+                          {sortable && (
+                            <button
+                              type="button"
+                              className={`sort-button ${sorting.dir ? "is-active" : ""}`}
+                              onClick={sorting.onToggle}
+                              aria-label={
+                                sorting.dir === "desc"
+                                  ? "Faturamento do maior para o menor. Clique para inverter."
+                                  : sorting.dir === "asc"
+                                    ? "Faturamento do menor para o maior. Clique para inverter."
+                                    : "Ordenar pelo faturamento, do maior para o menor"
+                              }
+                              title={
+                                sorting.dir === "asc"
+                                  ? "Menor para maior"
+                                  : "Maior para menor"
+                              }
+                            >
+                              {sorting.dir === "desc" ? (
+                                <ArrowDown size={14} />
+                              ) : sorting.dir === "asc" ? (
+                                <ArrowUp size={14} />
+                              ) : (
+                                <ArrowUpDown size={14} />
+                              )}
+                            </button>
+                          )}
+                        </div>
+                      </th>
+                    );
+                  })}
                 </tr>
               </thead>
               <tbody>
                 {visible.map((row) => (
                   <tr key={row.entry.ID}>
-                    <td>
-                      <DealLink
-                        id={row.deal.id}
-                        title={row.deal.title}
-                        url={row.url}
-                      />
-                    </td>
-                    <td>
-                      <span className="pipeline-label">
-                        {pipelines.find((p) => p.id === row.entry.CATEGORY_ID)
-                          ?.name || `Pipeline #${row.entry.CATEGORY_ID}`}
-                      </span>
-                    </td>
-                    <td>
-                      <div className="movement-stages">
-                        {row.previousStage ? (
-                          <>
-                            <StageBadge stage={row.previousStage} />
-                            <ArrowRight size={12} />
-                          </>
-                        ) : (
-                          <span>Primeira entrada</span>
-                        )}
-                        <StageBadge stage={row.stage} />
-                      </div>
-                    </td>
-                    <td className="date-cell">
-                      {dateTime(row.entry.CREATED_TIME)}
-                    </td>
-                    <td className="actor-cell">
-                      {row.actor || "Não informado pela API"}
-                    </td>
+                    {columns.order.map((key, index) => {
+                      const moving = dragProps(key, index);
+                      return (
+                        <td
+                          key={key}
+                          data-column={key}
+                          className={`${cellClass[key] ?? ""} ${moving.className}`}
+                          style={moving.style}
+                        >
+                          {cell[key](row)}
+                        </td>
+                      );
+                    })}
                   </tr>
                 ))}
               </tbody>

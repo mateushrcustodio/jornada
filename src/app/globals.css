@@ -1628,3 +1628,110 @@ td {
   pointer-events: none;
   transition: opacity 0.15s;
 }
+
+/* ---------- Movimentações: filtros de pessoa e faturamento, colunas ---------- */
+.filter-range {
+  padding-right: 8px;
+}
+.filter-range input {
+  width: 96px;
+  min-height: 34px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+}
+.filter-range input::placeholder {
+  color: var(--faint);
+  font-weight: 400;
+}
+.filter-range.is-invalid {
+  border-color: var(--red);
+}
+.panel-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 14px;
+}
+.th-inner {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.col-grip {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 26px;
+  margin-left: -8px;
+  border-radius: 6px;
+  color: var(--line-strong);
+  cursor: grab;
+  /* O arraste é por ponteiro: sem isto o toque rolaria a tabela. */
+  touch-action: none;
+}
+th:hover .col-grip,
+.col-grip:focus-visible {
+  color: var(--muted);
+}
+.col-grip:hover {
+  background: var(--soft-strong);
+  color: var(--ink);
+}
+table.is-reordering,
+table.is-reordering .col-grip,
+table.is-reordering .th-inner {
+  cursor: grabbing;
+  user-select: none;
+}
+th[data-column] .th-inner {
+  cursor: grab;
+}
+/* Arraste: o script move a coluna que segue o ponteiro (transform direto) e as
+   vizinhas deslizam. Só transform, para o navegador não refazer o layout. */
+.col-shift {
+  transition: transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+.col-dragged {
+  position: relative;
+  z-index: 3;
+  background: #fff;
+  box-shadow:
+    -6px 0 14px -8px rgba(23, 32, 51, 0.28),
+    6px 0 14px -8px rgba(23, 32, 51, 0.28);
+  will-change: transform;
+}
+@media (prefers-reduced-motion: reduce) {
+  .col-shift {
+    transition: none;
+  }
+}
+.sort-button {
+  display: inline-grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  color: var(--faint);
+}
+.sort-button:hover {
+  background: var(--soft-strong);
+  color: var(--ink);
+}
+.sort-button.is-active {
+  color: var(--blue);
+}
+.num-cell {
+  text-align: right;
+  white-space: nowrap;
+}
+th.num-cell .th-inner {
+  justify-content: flex-end;
+}
+.money {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}

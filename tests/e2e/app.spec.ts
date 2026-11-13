@@ -317,3 +317,252 @@ test("Movimentações e Parados buscam só a página aberta", async ({ page }) =
   // Nenhuma das duas abas pediu o painel completo.
   expect(full).toHaveLength(0);
 });
+
+// Lê uma coluna da tabela de Movimentações pelo título.
+async function column(page: import("@playwright/test").Page, title: string) {
+  return page.evaluate((name) => {
+    const headers = [...document.querySelectorAll("thead th")];
+    const index = headers.findIndex((th) => th.textContent?.trim() === name);
+    return [...document.querySelectorAll("tbody tr")].map(
+      (row) => row.children[index]?.textContent?.trim() ?? "",
+    );
+  }, title);
+}
+const reais = (text: string) =>
+  Number(text.replace(/[^\d,]/g, "").replace(",", "."));
+const DEFAULT_COLUMNS = [
+  "Negócio",
+  "Pipeline",
+  "Movimentação",
+  "Quando",
+  "Movido por",
+  "Pessoa responsável",
+  "Faturamento",
+];
+
+test("Movimentações: filtros por responsável e faturamento", async ({
+  page,
+}) => {
+  await page.goto("/dashboard/movements");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await expect(page.locator("thead th")).toHaveText(DEFAULT_COLUMNS);
+  await expect
+    .poll(async () => (await column(page, "Faturamento")).length)
+    .toBeGreaterThan(0);
+  const everyone = await page
+    .locator(".count-badge")
+    .filter({ hasText: "registros" })
+    .textContent();
+  const names = await column(page, "Pessoa responsável");
+  expect(names.every((name) => name && name !== "Não informado")).toBe(true);
+
+  await page
+    .getByLabel("Responsável", { exact: true })
+    .selectOption({ label: "Pedro Santos" });
+  await expect
+    .poll(async () => {
+      const rows = await column(page, "Pessoa responsável");
+      return rows.length > 0 && rows.every((name) => name === "Pedro Santos");
+    })
+    .toBe(true);
+  await expect(
+    page.locator(".count-badge").filter({ hasText: "registros" }),
+  ).not.toHaveText(everyone ?? "");
+
+  await page.getByRole("button", { name: "Limpar" }).click();
+  await page.getByLabel("Faturamento mínimo").fill("50.000");
+  await expect
+    .poll(async () => {
+      const rows = await column(page, "Faturamento");
+      return rows.length > 0 && rows.every((text) => reais(text) >= 50000);
+    })
+    .toBe(true);
+  await page.getByLabel("Faturamento máximo").fill("100000");
+  await expect
+    .poll(async () => {
+      const rows = (await column(page, "Faturamento")).map(reais);
+      return rows.length > 0 && rows.every((v) => v >= 50000 && v <= 100000);
+    })
+    .toBe(true);
+  // Faixa invertida não consulta e explica o motivo.
+  await page.getByLabel("Faturamento mínimo").fill("200000");
+  await expect(
+    page.getByText("O faturamento mínimo não pode ser maior"),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Limpar" }).click();
+  await expect(page.getByLabel("Faturamento mínimo")).toHaveValue("");
+  await expect(page.getByLabel("Faturamento máximo")).toHaveValue("");
+  await expect
+    .poll(async () => (await column(page, "Faturamento")).length)
+    .toBeGreaterThan(0);
+});
+
+test("Movimentações: seta do faturamento alterna maior→menor e menor→maior", async ({
+  page,
+}) => {
+  await page.goto("/dashboard/movements");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await expect
+    .poll(async () => (await column(page, "Faturamento")).length)
+    .toBeGreaterThan(0);
+  const header = page.locator("th", { hasText: "Faturamento" });
+  await expect(header).toHaveAttribute("aria-sort", "none");
+  const sortButton = header.locator(".sort-button");
+  const sortedValues = async (direction: "desc" | "asc") => {
+    await expect(header).toHaveAttribute(
+      "aria-sort",
+      direction === "desc" ? "descending" : "ascending",
+    );
+    return (await column(page, "Faturamento")).map(reais);
+  };
+  await sortButton.click();
+  const desc = await expect
+    .poll(async () => {
+      const values = (await column(page, "Faturamento")).map(reais);
+      return (
+        values.length > 1 && values.every((v, i) => !i || values[i - 1] >= v)
+      );
+    })
+    .toBe(true)
+    .then(() => sortedValues("desc"));
+  await sortButton.click();
+  await expect
+    .poll(async () => {
+      const values = (await column(page, "Faturamento")).map(reais);
+      return (
+        values.length > 1 && values.every((v, i) => !i || values[i - 1] <= v)
+      );
+    })
+    .toBe(true);
+  const asc = await sortedValues("asc");
+  // O maior valor de todas as páginas vem primeiro na ordem decrescente.
+  expect(desc[0]).toBeGreaterThanOrEqual(asc.at(-1)!);
+  expect(asc[0]).toBeLessThanOrEqual(desc.at(-1)!);
+  // A ordenação vale para todas as páginas, não só a visível.
+  await page.getByRole("button", { name: "Próxima página" }).click();
+  await expect(page.locator(".pagination")).toContainText("Página 2");
+  const second = (await column(page, "Faturamento")).map(reais);
+  expect(second[0]).toBeGreaterThanOrEqual(asc.at(-1)!);
+});
+
+test("Movimentações: colunas se reorganizam pelo teclado e a ordem fica salva", async ({
+  page,
+}) => {
+  await page.goto("/dashboard/movements");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await expect(page.locator("thead th")).toHaveText(DEFAULT_COLUMNS);
+  await page.getByRole("button", { name: "Mover coluna Faturamento" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  const moved = [
+    "Negócio",
+    "Pipeline",
+    "Movimentação",
+    "Quando",
+    "Faturamento",
+    "Movido por",
+    "Pessoa responsável",
+  ];
+  await expect(page.locator("thead th")).toHaveText(moved);
+  // Os valores acompanham o título.
+  expect((await column(page, "Faturamento")).every((v) => /\d/.test(v))).toBe(
+    true,
+  );
+  await page.reload();
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await expect(page.locator("thead th")).toHaveText(moved);
+  await page.getByRole("button", { name: "Restaurar colunas" }).click();
+  await expect(page.locator("thead th")).toHaveText(DEFAULT_COLUMNS);
+  await expect(
+    page.getByRole("button", { name: "Restaurar colunas" }),
+  ).toHaveCount(0);
+});
+
+test("Movimentações: arrastar acompanha o ponteiro, as vizinhas deslizam e a coluna assenta", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "arraste com mouse");
+  await page.goto("/dashboard/movements");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await expect(page.locator("thead th")).toHaveText(DEFAULT_COLUMNS);
+  const grip = page.getByRole("button", { name: "Mover coluna Pipeline" });
+  const header = (await page
+    .locator('th[data-column="pipeline"]')
+    .boundingBox())!;
+  const neighbour = (await page
+    .locator('th[data-column="movement"]')
+    .boundingBox())!;
+  const from = (await grip.boundingBox())!;
+  // A coluna assenta onde fica o seu centro: andar a metade de cada largura
+  // leva o centro de Pipeline até o meio de Movimentação.
+  const distance = (header.width + neighbour.width) / 2;
+  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(
+    from.x + from.width / 2 + distance,
+    from.y + from.height / 2,
+    { steps: 8 },
+  );
+  // Durante o arraste a coluna (cabeçalho e linhas) segue o ponteiro...
+  const dragged = page.locator('th[data-column="pipeline"]');
+  await expect(dragged).toHaveClass(/col-dragged/);
+  await expect(page.locator("tbody tr:first-child td.col-dragged")).toHaveCount(
+    1,
+  );
+  const moved = (await dragged.boundingBox())!;
+  expect(moved.x).toBeGreaterThan(from.x + 50);
+  // ...e a vizinha desliza para a casa que ficou livre.
+  await expect(page.locator('th[data-column="movement"]')).toHaveCSS(
+    "transform",
+    /matrix\(1, 0, 0, 1, -\d+/,
+  );
+  await page.mouse.up();
+  await expect(page.locator("thead th")).toHaveText([
+    "Negócio",
+    "Movimentação",
+    "Pipeline",
+    "Quando",
+    "Movido por",
+    "Pessoa responsável",
+    "Faturamento",
+  ]);
+  // Depois de assentar, nada fica deslocado nem marcado como arrastado.
+  await expect(page.locator(".col-dragged, .col-shift")).toHaveCount(0);
+  await expect(page.locator('th[data-column="pipeline"]')).toHaveCSS(
+    "transform",
+    "none",
+  );
+});
+
+test("Movimentações: arrastar pelo texto do título funciona e um clique não troca nada", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "arraste com mouse");
+  await page.goto("/dashboard/movements");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await expect(page.locator("thead th")).toHaveText(DEFAULT_COLUMNS);
+  await page.locator("th", { hasText: "Quando" }).getByText("Quando").click();
+  await expect(page.locator("thead th")).toHaveText(DEFAULT_COLUMNS);
+  const label = (await page
+    .locator("th", { hasText: "Faturamento" })
+    .getByText("Faturamento")
+    .boundingBox())!;
+  const first = (await page
+    .locator("th", { hasText: "Negócio" })
+    .boundingBox())!;
+  await page.mouse.move(label.x + 5, label.y + label.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(first.x + 20, first.y + first.height / 2, {
+    steps: 12,
+  });
+  await page.mouse.up();
+  await expect(page.locator("thead th")).toHaveText([
+    "Faturamento",
+    "Negócio",
+    "Pipeline",
+    "Movimentação",
+    "Quando",
+    "Movido por",
+    "Pessoa responsável",
+  ]);
+});

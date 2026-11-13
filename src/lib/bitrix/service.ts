@@ -6,19 +6,25 @@ import {
   type Filters,
   type HistoryEntry,
   type Movement,
+  type MovementSort,
   type PageData,
   type RawCategory,
   type RawStatus,
   type Settings,
   type StalledDeal,
+  type UserOption,
 } from "../types";
 import {
   buildDashboard,
   buildJourney,
   calculateVisits,
   dealUrl,
+  hasDealFilters,
   isClosed,
+  matchesDealFilters,
   resolveStage,
+  sortByOpportunity,
+  sortMovements,
   stageFilters,
 } from "../calculations";
 import {
@@ -27,9 +33,13 @@ import {
   buildBenchmark,
   type Benchmark,
 } from "../autopsy";
-import { demoDataset } from "../demo";
+import { DEMO_USERS, demoDataset } from "../demo";
 import { isDemo } from "./config";
-import { getSession, type MovementRows, type Session } from "./session";
+import {
+  getSession,
+  type MovementRows,
+  type Session,
+} from "./session";
 import {
   batch,
   batchWithMeta,
@@ -140,6 +150,9 @@ const dealSelect = [
   "stageSemanticId",
   "movedTime",
   "movedBy",
+  "assignedById",
+  "opportunity",
+  "currencyId",
 ];
 function normalizeHistory(rows: HistoryEntry[]): HistoryEntry[] {
   return rows.map((r) => ({
@@ -168,16 +181,20 @@ function userDisplayName(user: RawUser) {
     .join(" ");
 }
 
+// `extraUserIds` (ex.: responsáveis dos negócios) entram na mesma consulta de
+// nomes; depois dela, os nomes ficam em `session.userNames`.
 async function resolveHistoryActors(
   session: Session,
   rows: HistoryEntry[],
   fallbackDeals: Deal[] = [],
+  extraUserIds: number[] = [],
 ): Promise<HistoryEntry[]> {
   const ids = [
     ...new Set(
       [
         ...rows.map((row) => Number(row.MOVED_BY)),
         ...fallbackDeals.map((deal) => Number(deal.movedBy)),
+        ...extraUserIds.map(Number),
       ].filter((id) => Number.isFinite(id) && id > 0),
     ),
   ];
@@ -231,11 +248,62 @@ async function resolveHistoryActors(
   }));
 }
 function normalizeDeals(rows: Deal[]): Deal[] {
-  return rows.map((d) => ({
-    ...d,
-    id: Number(d.id),
-    categoryId: Number(d.categoryId),
-  }));
+  return rows.map((d) => {
+    const raw = d as unknown as Record<string, unknown>;
+    const assigned = Number(raw.assignedById);
+    const value =
+      raw.opportunity === undefined ||
+      raw.opportunity === null ||
+      raw.opportunity === ""
+        ? NaN
+        : Number(raw.opportunity);
+    const deal: Deal = {
+      ...d,
+      id: Number(d.id),
+      categoryId: Number(d.categoryId),
+    };
+    if (Number.isFinite(assigned) && assigned > 0) deal.assignedById = assigned;
+    else delete deal.assignedById;
+    if (Number.isFinite(value)) deal.opportunity = value;
+    else delete deal.opportunity;
+    return deal;
+  });
+}
+
+// Pessoas ativas do portal para o filtro "Responsável". Fica na sessão por
+// alguns minutos. Sem permissão em user.get, a lista vem vazia (e a tela avisa)
+// em vez de bloquear o painel.
+const USERS_TTL = 10 * 60000;
+export async function getUsers(): Promise<UserOption[]> {
+  if (isDemo()) return DEMO_USERS;
+  const session = await getSession();
+  if (session.users && session.users.expiresAt > Date.now())
+    return session.users.data;
+  try {
+    const rows = await listAll<RawUser>(
+      session,
+      "user.get",
+      { FILTER: { ACTIVE: true }, SORT: "LAST_NAME", ORDER: "ASC" },
+      "items",
+      5000,
+    );
+    const names = (session.userNames ??= new Map<number, string>());
+    const users: UserOption[] = [];
+    for (const row of rows) {
+      const id = Number(row.ID);
+      const name = userDisplayName(row);
+      if (!Number.isFinite(id) || id <= 0 || !name) continue;
+      names.set(id, name);
+      users.push({ id, name });
+    }
+    users.sort((a, b) => a.name.localeCompare(b.name, "pt-BR"));
+    session.users = { data: users, expiresAt: Date.now() + USERS_TTL };
+    return users;
+  } catch (error) {
+    // 403 aqui costuma ser só falta de escopo em user.get: o painel segue sem a lista.
+    if (error instanceof BitrixError && error.status === 401) throw error;
+    return [];
+  }
 }
 function unwrapBatch<T>(value: unknown, key = "items"): T[] {
   if (value && typeof value === "object" && "result" in value)
@@ -586,6 +654,17 @@ function rememberDealHistory(
     cache.delete(oldest);
   }
 }
+// Responsável e faixa de faturamento no formato do filtro de crm.item.list.
+function dealFilterQuery(filters: Filters): Record<string, unknown> {
+  const query: Record<string, unknown> = {};
+  if (filters.assignedById !== undefined)
+    query.assignedById = filters.assignedById;
+  if (filters.opportunityMin !== undefined)
+    query[">=opportunity"] = filters.opportunityMin;
+  if (filters.opportunityMax !== undefined)
+    query["<=opportunity"] = filters.opportunityMax;
+  return query;
+}
 export async function getDashboard(filters: Filters, settings: Settings) {
   const now = Date.now();
   if (isDemo()) {
@@ -618,6 +697,7 @@ export async function getDashboard(filters: Filters, settings: Settings) {
   if (filters.stage) {
     activeFilter.stageId = filters.stage;
   }
+  Object.assign(activeFilter, dealFilterQuery(filters));
   // As três leituras são independentes e saem juntas.
   const [catalog, recentResult, activeResult] = await Promise.all([
     getCatalog(session),
@@ -796,6 +876,80 @@ async function loadMovementRows(
   return promise;
 }
 
+// Negócios legíveis (crm.item.list respeita as permissões) em lotes de até 50
+// consultas de 50 IDs: 2.500 negócios por chamada contada.
+async function readDealsByIds(session: Session, ids: number[]) {
+  const found = new Map<number, Deal>();
+  if (!ids.length) return found;
+  const chunks: number[][] = [];
+  for (let i = 0; i < ids.length; i += 50) chunks.push(ids.slice(i, i + 50));
+  const groups: number[][][] = [];
+  for (let i = 0; i < chunks.length; i += 50)
+    groups.push(chunks.slice(i, i + 50));
+  let lists: Deal[][];
+  try {
+    const answers = await mapLimit(groups, 4, (group) =>
+      batch(
+        session,
+        group.map((chunk, index) => ({
+          method: "crm.item.list",
+          query: {
+            entityTypeId: 2,
+            filter: { "@id": chunk },
+            select: dealSelect,
+          },
+          as: `deals_${index}`,
+        })),
+      ),
+    );
+    lists = answers.flatMap((responses) =>
+      responses.map((response) => unwrapBatch<Deal>(response)),
+    );
+  } catch (error) {
+    if (error instanceof BitrixError && [401, 403].includes(error.status))
+      throw error;
+    // Portal sem batch: uma consulta por grupo de 50 negócios.
+    lists = await mapLimit(chunks, 4, (chunk) =>
+      listAll<Deal>(session, "crm.item.list", {
+        entityTypeId: 2,
+        filter: { "@id": chunk },
+        select: dealSelect,
+      }),
+    );
+  }
+  for (const list of lists)
+    for (const deal of normalizeDeals(list)) found.set(deal.id, deal);
+  return found;
+}
+
+// Os negócios do período ficam na sessão junto com a lista de movimentações:
+// trocar de página ou de ordenação não repete essa leitura.
+async function loadMovementDeals(
+  session: Session,
+  loaded: MovementRows,
+): Promise<Map<number, Deal>> {
+  const cached = session.movementDeals;
+  if (cached && cached.key === loaded.key && cached.expiresAt > Date.now())
+    return cached.deals;
+  const inFlight = session.movementDealsPending;
+  if (inFlight && inFlight.key === loaded.key) return inFlight.promise;
+  const promise = (async () => {
+    const owners = [...new Set(loaded.rows.map((row) => row.OWNER_ID))];
+    const deals = await readDealsByIds(session, owners);
+    session.movementDeals = {
+      key: loaded.key,
+      expiresAt: Date.now() + MOVEMENT_ROWS_TTL,
+      deals,
+    };
+    return deals;
+  })().finally(() => {
+    if (session.movementDealsPending?.promise === promise)
+      session.movementDealsPending = undefined;
+  });
+  session.movementDealsPending = { key: loaded.key, promise };
+  return promise;
+}
+
 function sliceRows<T>(rows: T[], page: number): PageData<T> {
   const current = clampPage(page, rows.length);
   return {
@@ -855,6 +1009,7 @@ export async function getMovementsPage(
   settings: Settings,
   page: number,
   asOf?: number,
+  sort?: MovementSort,
 ): Promise<PageData<Movement>> {
   const now = Date.now();
   if (isDemo()) {
@@ -868,15 +1023,22 @@ export async function getMovementsPage(
       now,
       true,
     );
-    return { ...sliceRows(full.movements, page), demo: true };
+    return {
+      ...sliceRows(sortMovements(full.movements, sort), page),
+      demo: true,
+    };
   }
   const session = await getSession();
   const { enabledStage } = stageFilters(filters, settings);
+  // Responsável, faturamento e ordenação por faturamento dependem do negócio,
+  // que o histórico não traz: nesses casos lê-se o período inteiro.
+  const dealScoped = hasDealFilters(filters) || sort !== undefined;
   const unfiltered =
     filters.pipeline === undefined &&
     !filters.stage &&
     !settings.monitoredPipelines.length &&
-    !settings.ignoredStages.length;
+    !settings.ignoredStages.length &&
+    !dealScoped;
   const result: PageData<Movement> = {
     rows: [],
     total: 0,
@@ -905,9 +1067,22 @@ export async function getMovementsPage(
     const loaded = await loadMovementRows(session, filters, asOf);
     // Pipeline, etapa e etapas ignoradas são aplicados aqui: alguns portais
     // não respeitam esses filtros no histórico, e assim o total é exato.
-    const matching = loaded.rows.filter((row) =>
+    let matching = loaded.rows.filter((row) =>
       enabledStage(row.CATEGORY_ID, row.STAGE_ID),
     );
+    if (dealScoped) {
+      // Sem acesso ao negócio, a movimentação também não entra na contagem.
+      const periodDeals = await loadMovementDeals(session, loaded);
+      matching = matching.filter((row) => {
+        const deal = periodDeals.get(row.OWNER_ID);
+        return !!deal && matchesDealFilters(deal, filters);
+      });
+      matching = sortByOpportunity(
+        matching,
+        sort,
+        (row) => periodDeals.get(row.OWNER_ID)?.opportunity,
+      );
+    }
     result.total = matching.length;
     result.page = clampPage(page, matching.length);
     pageRows = matching.slice(
@@ -925,8 +1100,20 @@ export async function getMovementsPage(
   // do usuário e o histórico de cada um, num único lote.
   const ids = [...new Set(pageRows.map((row) => row.OWNER_ID))];
   const { deals, history } = await readDealChunk(session, ids);
-  const resolved = await resolveHistoryActors(session, history, deals);
-  const dealsById = new Map(deals.map((deal) => [deal.id, deal]));
+  const resolved = await resolveHistoryActors(
+    session,
+    history,
+    deals,
+    deals.map((deal) => Number(deal.assignedById)),
+  );
+  const assigneeName = (id?: number) =>
+    id ? session.userNames?.get(id) : undefined;
+  const dealsById = new Map(
+    deals.map((deal) => [
+      deal.id,
+      { ...deal, assignedByName: assigneeName(deal.assignedById) },
+    ]),
+  );
   const visitsByDeal = new Map<number, ReturnType<typeof calculateVisits>>();
   for (const row of pageRows) {
     const deal = dealsById.get(row.OWNER_ID);
@@ -960,6 +1147,7 @@ function stalledFilter(
   const filter: Record<string, unknown> = {
     stageSemanticId: "P",
     "<=movedTime": cutoff,
+    ...dealFilterQuery(filters),
   };
   if (filters.pipeline !== undefined) {
     if (!enabledPipeline(filters.pipeline)) return undefined;
@@ -1044,6 +1232,7 @@ export async function getStalledPage(
       .filter(
         (deal) =>
           enabledStage(deal.categoryId, deal.stageId) &&
+          matchesDealFilters(deal, filters) &&
           deal.movedTime &&
           Number.isFinite(Date.parse(deal.movedTime)),
       )

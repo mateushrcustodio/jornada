@@ -5,6 +5,8 @@ import type {
   Filters,
   HistoryEntry,
   JourneyData,
+  Movement,
+  MovementSort,
   Settings,
   Stage,
   Visit,
@@ -131,6 +133,40 @@ export function stageFilters(filters: Filters, settings: Settings) {
     !settings.ignoredStages.includes(stageKey(id, stage));
   return { enabledPipeline, enabledStage };
 }
+// Filtros no nível do negócio (responsável e faixa de faturamento). Negócio sem
+// valor conta como 0, que é como o Bitrix24 guarda o campo vazio.
+export const hasDealFilters = (filters: Filters) =>
+  filters.assignedById !== undefined ||
+  filters.opportunityMin !== undefined ||
+  filters.opportunityMax !== undefined;
+export function matchesDealFilters(deal: Deal, filters: Filters) {
+  if (
+    filters.assignedById !== undefined &&
+    deal.assignedById !== filters.assignedById
+  )
+    return false;
+  const value = deal.opportunity ?? 0;
+  if (filters.opportunityMin !== undefined && value < filters.opportunityMin)
+    return false;
+  if (filters.opportunityMax !== undefined && value > filters.opportunityMax)
+    return false;
+  return true;
+}
+// Ordena pelo faturamento do negócio. A ordenação é estável: movimentações do
+// mesmo valor continuam da mais recente para a mais antiga.
+export function sortByOpportunity<T>(
+  rows: T[],
+  sort: MovementSort | undefined,
+  value: (row: T) => number | undefined,
+): T[] {
+  if (!sort) return rows;
+  const factor = sort.dir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => factor * ((value(a) ?? 0) - (value(b) ?? 0)));
+}
+export const sortMovements = (
+  rows: Movement[],
+  sort: MovementSort | undefined,
+) => sortByOpportunity(rows, sort, (row) => row.deal.opportunity);
 export function buildDashboard(
   deals: Deal[],
   history: HistoryEntry[],
@@ -142,10 +178,12 @@ export function buildDashboard(
   domain?: string,
 ): DashboardData {
   const { enabledStage } = stageFilters(filters, settings);
-  const allVisits = deals.map((deal) => ({
-    deal,
-    visits: calculateVisits(history, deal, catalog, now),
-  }));
+  const allVisits = deals
+    .filter((deal) => matchesDealFilters(deal, filters))
+    .map((deal) => ({
+      deal,
+      visits: calculateVisits(history, deal, catalog, now),
+    }));
   const movements = allVisits
     .flatMap(({ deal, visits }) =>
       visits

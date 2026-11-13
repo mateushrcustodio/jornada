@@ -2,13 +2,20 @@ import "server-only";
 import { randomBytes } from "node:crypto";
 import { cookies } from "next/headers";
 import { BitrixError } from "./errors";
-import type { Catalog, Deal, HistoryEntry } from "../types";
+import type { Catalog, Deal, HistoryEntry, UserOption } from "../types";
 export interface MovementRows {
   key: string;
   expiresAt: number;
   rows: HistoryEntry[];
   total: number;
   truncated: boolean;
+}
+// Negócios (responsável, valor...) das movimentações do período, lidos só
+// quando a lista é filtrada ou ordenada por campos do negócio.
+export interface MovementDeals {
+  key: string;
+  expiresAt: number;
+  deals: Map<number, Deal>;
 }
 export interface Session {
   id: string;
@@ -24,6 +31,8 @@ export interface Session {
   catalog?: { data: Catalog; expiresAt: number };
   catalogPending?: Promise<Catalog>;
   userNames?: Map<number, string>;
+  // Pessoas ativas do portal, para o filtro "Responsável".
+  users?: { data: UserOption[]; expiresAt: number };
   // Amostra de negócios fechados usada na autópsia. Fica na sessão do usuário
   // porque a lista respeita as permissões de leitura de quem consultou.
   closedSample?: {
@@ -40,6 +49,8 @@ export interface Session {
   // paginar Movimentações sem refazer a leitura a cada página.
   movementRows?: MovementRows;
   movementRowsPending?: { key: string; promise: Promise<MovementRows> };
+  movementDeals?: MovementDeals;
+  movementDealsPending?: { key: string; promise: Promise<Map<number, Deal>> };
   // Histórico completo de negócios ativos já lido, guardado com o movedTime do
   // negócio no momento da leitura. Enquanto o movedTime não muda, atualizar o
   // painel não precisa reler o histórico desse negócio.
@@ -124,6 +135,7 @@ export function createSession(data: SessionData): Session {
     ...(donor && {
       catalog: donor.catalog,
       userNames: donor.userNames,
+      users: donor.users,
       closedSample: donor.closedSample,
     }),
   };

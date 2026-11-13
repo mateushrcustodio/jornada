@@ -30,6 +30,15 @@ export interface Deal {
   stageSemanticId?: string;
   movedTime?: string;
   movedBy?: number;
+  // Pessoa responsável e valor (campo padrão "Valor" do negócio, OPPORTUNITY).
+  assignedById?: number;
+  assignedByName?: string;
+  opportunity?: number;
+  currencyId?: string;
+}
+export interface UserOption {
+  id: number;
+  name: string;
 }
 export interface Catalog {
   pipelines: Pipeline[];
@@ -52,6 +61,16 @@ export interface Filters {
   to: string;
   pipeline?: number;
   stage?: string;
+  assignedById?: number;
+  // Faixa do valor (faturamento) do negócio; o valor ausente conta como 0.
+  opportunityMin?: number;
+  opportunityMax?: number;
+}
+// Ordenação opcional das Movimentações pelo faturamento do negócio.
+export type SortDirection = "asc" | "desc";
+export interface MovementSort {
+  by: "opportunity";
+  dir: SortDirection;
 }
 export interface Visit {
   entry: HistoryEntry;

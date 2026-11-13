@@ -25,9 +25,22 @@ export const filtersSchema = z
     to: z.iso.datetime({ offset: true }),
     pipeline: z.number().int().nonnegative().optional(),
     stage: z.string().max(100).optional(),
+    assignedById: z.number().int().positive().optional(),
+    opportunityMin: z.number().min(0).max(1e13).optional(),
+    opportunityMax: z.number().min(0).max(1e13).optional(),
   })
   .refine(
     (f) =>
       Date.parse(f.from) <= Date.parse(f.to) &&
       Date.parse(f.to) - Date.parse(f.from) <= 366 * 86400000,
+  )
+  .refine(
+    (f) =>
+      f.opportunityMin === undefined ||
+      f.opportunityMax === undefined ||
+      f.opportunityMin <= f.opportunityMax,
   );
+export const sortSchema = z.object({
+  by: z.literal("opportunity"),
+  dir: z.enum(["asc", "desc"]),
+});
