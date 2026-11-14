@@ -41,7 +41,8 @@ src/app/                    rotas (App Router) e globals.css
   api/bitrix/placement      POST dos placements: valida token/domínio, abre a sessão, redireciona (303)
   api/auth/{start,callback} OAuth opcional fora do iframe
   api/dashboard             POST com filtros -> painel completo (visão geral e etapas)
-  api/dashboard/page        POST -> total + 1 página de Movimentações ou Parados
+  api/dashboard/page        POST -> total + 1 página de Movimentações ou Parados (aceita `sort` por faturamento)
+  api/users                 GET -> pessoas ativas (filtro Responsável)
   api/catalog               pipelines, etapas
   api/deal/[id]             jornada; /benchmark (mediana dos fechados) e /autopsy (publica comentário)
   api/install               registra placements (exige admin)
@@ -49,6 +50,7 @@ src/app/                    rotas (App Router) e globals.css
   dashboard/[view]          movements | stalled | stages
 src/components/
   shell.tsx                 /deal/* => só conteúdo; resto => menu superior
+  column-order.ts           ordem das colunas arrastáveis (localStorage)
   dashboard.tsx             todo o painel (Visão geral + 3 views), filtros, cache de 5 min no navegador;
                             Movimentações e Parados usam /api/dashboard/page (paginação controlada)
   compact-journey.tsx       tela do card (timeline, estatísticas, autópsia)  [journey.tsx só reexporta]
@@ -85,6 +87,7 @@ A lentidão vinha de espaçar 550 ms cada chamada REST, chamadas em sequência e
 - **Sessão reaproveitada** por usuário/portal (`profile`), mantendo catálogo, nomes e amostra de fechados. O POST do placement já aquece o catálogo.
 - **Páginas sob demanda (Movimentações e Parados):** `getMovementsPage` e `getStalledPage` em `service.ts`. Movimentações sem filtro lê só o bloco de 50 do histórico (o total vem do Bitrix24) e um lote com os negócios da página; com filtro, guarda na sessão a lista do período (3 min) e filtra localmente. Parados usa `crm.item.list` ordenado por `movedTime`, com fallback para o cálculo completo. Visão geral e Etapas continuam lendo tudo. Regras de pipeline/etapa vêm de `stageFilters` (`calculations.ts`), compartilhadas com o painel completo.
 - **Painel completo sem teto de 500:** lê todos os ativos pela lista (barata) e só busca o histórico de cada negócio para quem se moveu no período (`getDashboard`). Ativo sem movimentação no período usa `movedTime` (mesma regra de Parados). O orçamento de negócios detalhados vem de `dashboardDealBudget()` em `client.ts` (`(rajada - 10) x 49`, ou `BITRIX_DASHBOARD_MAX_DEALS`). O histórico de ativos fica em `session.dealHistory` (10 min, até 5.000) e vale enquanto o `movedTime` do negócio não muda. Medido no simulador (200 ms, limite real): 487 ativos em 15 chamadas (~1,2 s); 1.217 ativos em 27 chamadas (~2,3 s); 2ª atualização com 6 a 9 chamadas.
+- **Responsável / faturamento (Movimentações):** o campo "faturamento" é o **Valor do negócio** (`opportunity`, padrão do Bitrix24; decisão do Vini). Filtros em `Filters` (`assignedById`, `opportunityMin/Max`) e ordenação em `MovementSort`; regras em `matchesDealFilters`/`sortByOpportunity` (`calculations.ts`), valor ausente = 0. Com esses filtros ou ordenação, `getMovementsPage` sai do caminho rápido de 1 bloco: lê o período (`loadMovementRows`) e os negócios dele em lote (`loadMovementDeals`, sessão 3 min) e filtra/ordena localmente. Sem eles, o caminho rápido e o limite de 5 chamadas continuam. O nome do responsável só é resolvido nas Movimentações (mesmo `user.get` do "Movido por"); por isso os testes de equivalência ignoram `assignedByName`.
 - **Caches:** catálogo 5 min (por sessão, com promessa compartilhada), amostra de fechados 10 min, navegador 5 min no painel (`DASHBOARD_CACHE_MS`) com filtros "grudados" ao voltar.
 - Medido no simulador (200 ms de latência, limites reais): card fechado 5,7 s → 0,6 s; painel 30 d (400 negócios) 21,7 s → 0,9 s; Movimentações pág. 1 sem filtro 0,8 s e Parados pág. 1 0,6 s, qualquer que seja o volume (3.000 negócios: painel completo 4,3 s).
 

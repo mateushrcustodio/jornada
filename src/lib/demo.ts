@@ -1,4 +1,14 @@
-import type { Catalog, Deal, HistoryEntry } from "./types";
+import type { Catalog, Deal, HistoryEntry, UserOption } from "./types";
+// Responsáveis fictícios do modo demo (mesmos nomes de quem move os negócios).
+export const DEMO_USERS: UserOption[] = [
+  { id: 1, name: "Mariana Silva" },
+  { id: 2, name: "Pedro Santos" },
+  { id: 3, name: "Camila Oliveira" },
+];
+const DEMO_VALUES = [
+  12500, 48000, 7300, 150000, 22000, 89900, 3500, 61000, 18200, 275000, 9400,
+  36000, 5200, 120000, 27500, 14800, 72000, 41000,
+];
 // Dados sintéticos EXCLUSIVOS do modo DEMO_MODE=true. Nunca usados como fallback da API real.
 export function demoDataset(now = Date.now()): {
   catalog: Catalog;
@@ -96,6 +106,10 @@ export function demoDataset(now = Date.now()): {
       stageId: last.STAGE_ID,
       stageSemanticId: last.STAGE_SEMANTIC_ID,
       movedTime: last.CREATED_TIME,
+      assignedById: DEMO_USERS[(i + 1) % 3].id,
+      assignedByName: DEMO_USERS[(i + 1) % 3].name,
+      opportunity: DEMO_VALUES[i % DEMO_VALUES.length],
+      currencyId: "BRL",
     });
   });
   // Negócios já encerrados há meses (fora dos períodos do painel). Servem de
@@ -188,6 +202,10 @@ export function demoDataset(now = Date.now()): {
       stageId: last.STAGE_ID,
       stageSemanticId: last.STAGE_SEMANTIC_ID,
       movedTime: last.CREATED_TIME,
+      assignedById: DEMO_USERS[index % 3].id,
+      assignedByName: DEMO_USERS[index % 3].name,
+      opportunity: DEMO_VALUES[(index * 5 + 2) % DEMO_VALUES.length],
+      currencyId: "BRL",
     });
   });
   return { catalog, deals, history };

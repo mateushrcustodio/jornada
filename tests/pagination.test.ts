@@ -3,7 +3,12 @@ import { createFakeBitrix } from "./fake-bitrix";
 import { resetRateLimits } from "@/lib/bitrix/client";
 import type { Session } from "@/lib/bitrix/session";
 import { DEFAULT_SETTINGS } from "@/lib/settings";
-import { PAGE_SIZE, type Filters, type Settings } from "@/lib/types";
+import {
+  PAGE_SIZE,
+  type Filters,
+  type MovementSort,
+  type Settings,
+} from "@/lib/types";
 
 const { current } = vi.hoisted(() => ({
   current: { session: undefined as Session | undefined },
@@ -52,9 +57,12 @@ afterEach(() => {
 const open = () =>
   createFakeBitrix({ now: NOW, deals: 400, forbidden: () => false });
 const ids = (rows: { entry: { ID: number } }[]) => rows.map((r) => r.entry.ID);
+// O nome do responsável só é resolvido onde a tela o mostra (Movimentações).
 const withoutClock = (value: unknown) =>
   JSON.parse(
-    JSON.stringify(value, (k, v) => (k === "queriedAt" ? undefined : v)),
+    JSON.stringify(value, (k, v) =>
+      k === "queriedAt" || k === "assignedByName" ? undefined : v,
+    ),
   );
 
 describe("Movimentações sob demanda", () => {
@@ -210,6 +218,247 @@ describe("Movimentações sob demanda", () => {
   });
 });
 
+async function allMovements(
+  scoped: Filters,
+  sort?: MovementSort,
+  settings: Settings = DEFAULT_SETTINGS,
+) {
+  const first = await service.getMovementsPage(
+    scoped,
+    settings,
+    1,
+    undefined,
+    sort,
+  );
+  const collected = [...first.rows];
+  for (let page = 2; page <= Math.ceil(first.total / PAGE_SIZE); page += 1)
+    collected.push(
+      ...(
+        await service.getMovementsPage(scoped, settings, page, undefined, sort)
+      ).rows,
+    );
+  return { first, rows: collected };
+}
+
+describe("Movimentações por responsável, faturamento e ordenação", () => {
+  it("filtra por responsável como o painel completo", async () => {
+    const fake = open();
+    vi.stubGlobal("fetch", fake.fetch);
+    const scoped = { ...filters, assignedById: 3 };
+    const full = await service.getDashboard(scoped, DEFAULT_SETTINGS);
+    const { first, rows } = await allMovements(scoped);
+    expect(full.movements.length).toBeGreaterThan(0);
+    expect(first.total).toBe(full.movements.length);
+    expect(ids(rows)).toEqual(ids(full.movements));
+    expect(rows.every((r) => r.deal.assignedById === 3)).toBe(true);
+    // Menos movimentações do que sem o filtro.
+    const everyone = await service.getMovementsPage(
+      filters,
+      DEFAULT_SETTINGS,
+      1,
+    );
+    expect(first.total).toBeLessThan(everyone.total);
+  });
+  it("filtra pela faixa de faturamento (mínimo, máximo ou os dois)", async () => {
+    const fake = open();
+    vi.stubGlobal("fetch", fake.fetch);
+    for (const range of [
+      { opportunityMin: 20000 },
+      { opportunityMax: 10000 },
+      { opportunityMin: 10000, opportunityMax: 30000 },
+    ]) {
+      const scoped = { ...filters, ...range };
+      const full = await service.getDashboard(scoped, DEFAULT_SETTINGS);
+      const { first, rows } = await allMovements(scoped);
+      expect(first.total).toBe(full.movements.length);
+      expect(ids(rows)).toEqual(ids(full.movements));
+      for (const row of rows) {
+        const value = row.deal.opportunity ?? 0;
+        expect(value).toBeGreaterThanOrEqual(range.opportunityMin ?? 0);
+        expect(value).toBeLessThanOrEqual(range.opportunityMax ?? Infinity);
+      }
+    }
+  });
+  it("combina responsável, faturamento, pipeline e etapas ignoradas", async () => {
+    const fake = open();
+    vi.stubGlobal("fetch", fake.fetch);
+    const settings: Settings = {
+      ...DEFAULT_SETTINGS,
+      ignoredStages: ["0:NEW"],
+    };
+    const scoped = {
+      ...filters,
+      pipeline: 0,
+      assignedById: 2,
+      opportunityMin: 5000,
+    };
+    const full = await service.getDashboard(scoped, settings);
+    const { rows } = await allMovements(scoped, undefined, settings);
+    expect(rows.length).toBeGreaterThan(0);
+    expect(ids(rows)).toEqual(ids(full.movements));
+  });
+  it("ordena todas as páginas pelo faturamento, do maior para o menor e o contrário", async () => {
+    const fake = open();
+    vi.stubGlobal("fetch", fake.fetch);
+    const full = await service.getDashboard(filters, DEFAULT_SETTINGS);
+    const desc = await allMovements(filters, {
+      by: "opportunity",
+      dir: "desc",
+    });
+    const values = desc.rows.map((r) => r.deal.opportunity ?? 0);
+    expect(values).toEqual([...values].sort((a, b) => b - a));
+    expect(desc.first.total).toBe(full.movements.length);
+    // Mesmo conjunto de movimentações, só em outra ordem.
+    expect(ids(desc.rows).sort((a, b) => a - b)).toEqual(
+      ids(full.movements).sort((a, b) => a - b),
+    );
+    const asc = await allMovements(filters, { by: "opportunity", dir: "asc" });
+    const ascValues = asc.rows.map((r) => r.deal.opportunity ?? 0);
+    expect(ascValues).toEqual([...ascValues].sort((a, b) => a - b));
+    expect(ascValues[0]).toBeLessThan(ascValues.at(-1)!);
+    // Valores iguais continuam da movimentação mais recente para a mais antiga.
+    for (let i = 1; i < desc.rows.length; i += 1)
+      if (values[i] === values[i - 1])
+        expect(
+          Date.parse(desc.rows[i - 1].entry.CREATED_TIME),
+        ).toBeGreaterThanOrEqual(Date.parse(desc.rows[i].entry.CREATED_TIME));
+  });
+  it("mostra o nome do responsável e o valor de cada linha", async () => {
+    const fake = open();
+    vi.stubGlobal("fetch", fake.fetch);
+    const page = await service.getMovementsPage(filters, DEFAULT_SETTINGS, 1);
+    for (const row of page.rows) {
+      expect(row.deal.assignedByName).toBe(`Pessoa ${row.deal.assignedById}`);
+      expect(row.deal.opportunity).toBe(((row.deal.id * 7919) % 50) * 1000);
+      expect(row.deal.currencyId).toBe("BRL");
+    }
+    // Sem filtro de negócio, o caminho rápido continua com poucas chamadas.
+    expect(fake.stats.hits).toBeLessThanOrEqual(5);
+  });
+  it("com filtro de negócio lê os negócios do período em lote, uma vez só", async () => {
+    const fake = open();
+    vi.stubGlobal("fetch", fake.fetch);
+    const scoped = { ...filters, assignedById: 1 };
+    await service.getMovementsPage(scoped, DEFAULT_SETTINGS, 1, 7);
+    fake.stats.hits = 0;
+    fake.stats.byMethod = {};
+    const second = await service.getMovementsPage(
+      scoped,
+      DEFAULT_SETTINGS,
+      2,
+      7,
+    );
+    expect(second.rows.length).toBeGreaterThan(0);
+    // Segunda página: só o lote dos negócios da página (e nomes, se faltarem).
+    expect(fake.stats.hits).toBeLessThanOrEqual(2);
+    // Trocar a ordenação reaproveita a lista e os negócios do período.
+    fake.stats.hits = 0;
+    await service.getMovementsPage(scoped, DEFAULT_SETTINGS, 1, 7, {
+      by: "opportunity",
+      dir: "desc",
+    });
+    expect(fake.stats.hits).toBeLessThanOrEqual(2);
+  });
+  it("não conta nem ordena movimentações de negócios sem acesso", async () => {
+    const fake = createFakeBitrix({ now: NOW, deals: 400 });
+    vi.stubGlobal("fetch", fake.fetch);
+    const blocked = new Set(
+      fake.deals
+        .filter((d) => Number(d.id) % 37 === 0)
+        .map((d) => Number(d.id)),
+    );
+    const { first, rows } = await allMovements(
+      { ...filters, opportunityMin: 0 },
+      { by: "opportunity", dir: "desc" },
+    );
+    expect(rows.length).toBe(first.total);
+    expect(rows.some((r) => blocked.has(r.deal.id))).toBe(false);
+  });
+  it("se o portal não aceitar batch, lê os negócios por consultas simples", async () => {
+    const fake = open();
+    const noBatch = async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      if (String(input).endsWith("/batch.json"))
+        return new Response(
+          JSON.stringify({ error: "BATCH_OFF", error_description: "" }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      return fake.fetch(input, init);
+    };
+    vi.stubGlobal("fetch", noBatch);
+    const scoped = { ...filters, assignedById: 4 };
+    const full = await service.getDashboard(scoped, DEFAULT_SETTINGS);
+    const { rows } = await allMovements(scoped);
+    expect(ids(rows)).toEqual(ids(full.movements));
+  });
+  it("lista as pessoas ativas em ordem alfabética e guarda na sessão", async () => {
+    const fake = open();
+    vi.stubGlobal("fetch", fake.fetch);
+    const users = await service.getUsers();
+    expect(users.map((u) => u.name)).toEqual([
+      "Pessoa 1",
+      "Pessoa 2",
+      "Pessoa 3",
+      "Pessoa 4",
+      "Pessoa 5",
+    ]);
+    fake.stats.hits = 0;
+    await service.getUsers();
+    expect(fake.stats.hits).toBe(0);
+  });
+  it("sem permissão em user.get, a lista de pessoas vem vazia", async () => {
+    const fake = open();
+    const denied = async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      if (String(input).endsWith("/user.get.json"))
+        return new Response(
+          JSON.stringify({
+            error: "insufficient_scope",
+            error_description: "",
+          }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      return fake.fetch(input, init);
+    };
+    vi.stubGlobal("fetch", denied);
+    expect(await service.getUsers()).toEqual([]);
+  });
+});
+
+describe("Parados e visão geral com responsável e faturamento", () => {
+  it("Parados aplica os mesmos filtros do painel completo", async () => {
+    const fake = open();
+    vi.stubGlobal("fetch", fake.fetch);
+    const settings = { ...DEFAULT_SETTINGS, stalledHours: 1 };
+    const scoped = { ...filters, assignedById: 2, opportunityMin: 10000 };
+    const full = await service.getDashboard(scoped, settings);
+    expect(full.stalled.length).toBeGreaterThan(0);
+    const page = await service.getStalledPage(scoped, settings, 1);
+    expect(page.total).toBe(full.stalled.length);
+    expect(page.rows.every((r) => r.deal.assignedById === 2)).toBe(true);
+    expect(page.rows.every((r) => (r.deal.opportunity ?? 0) >= 10000)).toBe(
+      true,
+    );
+  });
+  it("visão geral considera só os negócios do responsável", async () => {
+    const fake = open();
+    vi.stubGlobal("fetch", fake.fetch);
+    const everyone = await service.getDashboard(filters, DEFAULT_SETTINGS);
+    const mine = await service.getDashboard(
+      { ...filters, assignedById: 1 },
+      DEFAULT_SETTINGS,
+    );
+    expect(mine.movements.length).toBeGreaterThan(0);
+    expect(mine.movements.length).toBeLessThan(everyone.movements.length);
+    expect(mine.movements.every((m) => m.deal.assignedById === 1)).toBe(true);
+    expect(mine.activeCount).toBeLessThan(everyone.activeCount);
+  });
+});
+
 describe("Parados sob demanda", () => {
   it("uma chamada traz o total e a página, igual ao painel completo", async () => {
     const fake = open();
@@ -331,5 +580,39 @@ describe("modo demonstração", () => {
     );
     const stalled = await service.getStalledPage(filters, DEFAULT_SETTINGS, 1);
     expect(stalled.total).toBe(full.stalled.length);
+  });
+});
+
+describe("modo demonstração com responsável, faturamento e ordenação", () => {
+  it("filtra e ordena os dados sintéticos igual ao painel", async () => {
+    vi.stubEnv("DEMO_MODE", "true");
+    const users = await service.getUsers();
+    expect(users.length).toBeGreaterThan(1);
+    const scoped = { ...filters, assignedById: users[0].id };
+    const full = await service.getDashboard(scoped, DEFAULT_SETTINGS);
+    const page = await service.getMovementsPage(scoped, DEFAULT_SETTINGS, 1);
+    expect(page.total).toBe(full.movements.length);
+    expect(page.total).toBeGreaterThan(0);
+    expect(page.rows.every((r) => r.deal.assignedById === users[0].id)).toBe(
+      true,
+    );
+    const sorted = await service.getMovementsPage(
+      filters,
+      DEFAULT_SETTINGS,
+      1,
+      undefined,
+      { by: "opportunity", dir: "desc" },
+    );
+    const values = sorted.rows.map((r) => r.deal.opportunity ?? 0);
+    expect(values).toEqual([...values].sort((a, b) => b - a));
+    const ranged = await service.getMovementsPage(
+      { ...filters, opportunityMin: 100000 },
+      DEFAULT_SETTINGS,
+      1,
+    );
+    expect(ranged.rows.length).toBeGreaterThan(0);
+    expect(ranged.rows.every((r) => (r.deal.opportunity ?? 0) >= 100000)).toBe(
+      true,
+    );
   });
 });

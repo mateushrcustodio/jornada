@@ -29,8 +29,14 @@ export function parseQuery(query: string): Row {
     const rawKey = eq === -1 ? pair : pair.slice(0, eq);
     const value = eq === -1 ? "" : decodeURIComponent(pair.slice(eq + 1));
     const key = decodeURIComponent(rawKey);
-    const base = key.slice(0, key.indexOf("[") === -1 ? undefined : key.indexOf("["));
-    const parts = [base, ...[...key.matchAll(/\[([^\]]*)\]/g)].map((m) => m[1])];
+    const base = key.slice(
+      0,
+      key.indexOf("[") === -1 ? undefined : key.indexOf("["),
+    );
+    const parts = [
+      base,
+      ...[...key.matchAll(/\[([^\]]*)\]/g)].map((m) => m[1]),
+    ];
     let target: Row = result;
     parts.forEach((part, index) => {
       const last = index === parts.length - 1;
@@ -40,7 +46,8 @@ export function parseQuery(query: string): Row {
         return;
       }
       const nextIsList = parts[index + 1] === "";
-      const name = part === "" ? String((target as unknown as unknown[]).length) : part;
+      const name =
+        part === "" ? String((target as unknown as unknown[]).length) : part;
       if (target[name] === undefined) target[name] = nextIsList ? [] : {};
       target = target[name] as Row;
     });
@@ -49,8 +56,14 @@ export function parseQuery(query: string): Row {
 }
 
 function compare(a: unknown, b: unknown) {
-  const ta = typeof a === "string" && /^\d{4}-\d\d-\d\dT/.test(a) ? Date.parse(a) : Number(a);
-  const tb = typeof b === "string" && /^\d{4}-\d\d-\d\dT/.test(b) ? Date.parse(b) : Number(b);
+  const ta =
+    typeof a === "string" && /^\d{4}-\d\d-\d\dT/.test(a)
+      ? Date.parse(a)
+      : Number(a);
+  const tb =
+    typeof b === "string" && /^\d{4}-\d\d-\d\dT/.test(b)
+      ? Date.parse(b)
+      : Number(b);
   if (Number.isFinite(ta) && Number.isFinite(tb)) return ta - tb;
   return String(a).localeCompare(String(b));
 }
@@ -115,7 +128,13 @@ export function createFakeBitrix(options: FakeOptions = {}) {
   const deals: Row[] = [];
   let historyId = 1;
   // Histórico em ordem cronológica global, como os IDs reais.
-  const plan: { deal: number; at: number; stage: string[]; category: number; by: number }[] = [];
+  const plan: {
+    deal: number;
+    at: number;
+    stage: string[];
+    category: number;
+    by: number;
+  }[] = [];
   for (let id = 1; id <= dealCount; id += 1) {
     const category = id % 4 === 0 ? 3 : 0;
     const list = stages[category];
@@ -131,7 +150,7 @@ export function createFakeBitrix(options: FakeOptions = {}) {
         at: Math.min(now - 60000, created + step * (((id * 31) % 5) + 1) * DAY),
         stage: list[index],
         category,
-        by: (id + step) % 5 + 1,
+        by: ((id + step) % 5) + 1,
       });
     }
   }
@@ -156,6 +175,10 @@ export function createFakeBitrix(options: FakeOptions = {}) {
       stageSemanticId: last.STAGE_SEMANTIC_ID,
       movedTime: last.CREATED_TIME,
       movedBy: last.MOVED_BY,
+      // Responsável (5 pessoas) e valor; alguns negócios ficam com valor 0.
+      assignedById: (id % 5) + 1,
+      opportunity: ((id * 7919) % 50) * 1000,
+      currencyId: "BRL",
     });
   }
   const readableDeals = () => deals.filter((d) => !forbidden(Number(d.id)));
@@ -203,7 +226,8 @@ export function createFakeBitrix(options: FakeOptions = {}) {
     }),
     "crm.status.entity.items": (params) => {
       const entity = String(params.entityId);
-      const category = entity === "DEAL_STAGE" ? 0 : Number(entity.split("_").at(-1));
+      const category =
+        entity === "DEAL_STAGE" ? 0 : Number(entity.split("_").at(-1));
       return {
         result: (stages[category] ?? []).map(([STATUS_ID, NAME], index) => ({
           STATUS_ID,
@@ -236,14 +260,28 @@ export function createFakeBitrix(options: FakeOptions = {}) {
     },
     "user.get": (params) => {
       const id = Number((params.FILTER as Row | undefined)?.ID);
+      // Sem ID: lista de pessoas ativas, em ordem inversa para testar a ordenação.
+      if (!id)
+        return {
+          result: [5, 4, 3, 2, 1].map((n) => ({
+            ID: String(n),
+            NAME: `Pessoa`,
+            LAST_NAME: `${n}`,
+          })),
+        };
       return {
-        result: id ? [{ ID: String(id), NAME: `Pessoa`, LAST_NAME: `${id}` }] : [],
+        result: [{ ID: String(id), NAME: `Pessoa`, LAST_NAME: `${id}` }],
       };
     },
     "crm.timeline.comment.add": () => ({ result: 1 }),
   };
 
-  const stats = { hits: 0, byMethod: {} as Record<string, number>, subcommands: 0, limitErrors: 0 };
+  const stats = {
+    hits: 0,
+    byMethod: {} as Record<string, number>,
+    subcommands: 0,
+    limitErrors: 0,
+  };
   let bucket = 0;
   let bucketAt = Date.now();
   function hit() {
@@ -271,7 +309,10 @@ export function createFakeBitrix(options: FakeOptions = {}) {
           if (response.total !== undefined) total[key] = response.total;
           if (response.next !== undefined) next[key] = response.next;
         } catch (error) {
-          errors[key] = { error: (error as Error).message, error_description: "" };
+          errors[key] = {
+            error: (error as Error).message,
+            error_description: "",
+          };
           if (halt) break;
         }
       }
@@ -296,7 +337,8 @@ export function createFakeBitrix(options: FakeOptions = {}) {
     const match = /\/rest\/(.+)\.json$/.exec(url);
     if (!match) throw new Error(`URL inesperada no teste: ${url}`);
     stats.hits += 1;
-    if (options.latencyMs) await new Promise((r) => setTimeout(r, options.latencyMs));
+    if (options.latencyMs)
+      await new Promise((r) => setTimeout(r, options.latencyMs));
     const json = (data: unknown, status = 200) =>
       new Response(JSON.stringify(data), {
         status,
@@ -304,7 +346,10 @@ export function createFakeBitrix(options: FakeOptions = {}) {
       });
     if (options.enforceLimit && hit()) {
       stats.limitErrors += 1;
-      return json({ error: "QUERY_LIMIT_EXCEEDED", error_description: "" }, 503);
+      return json(
+        { error: "QUERY_LIMIT_EXCEEDED", error_description: "" },
+        503,
+      );
     }
     const body = JSON.parse(String(init?.body ?? "{}")) as Row;
     try {

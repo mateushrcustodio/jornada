@@ -45,3 +45,31 @@ export function periodRange(
     );
   return { from: start.toISOString(), to: end.toISOString() };
 }
+// Valor do negócio (faturamento) na moeda do próprio negócio; sem moeda
+// reconhecida, mostra só o número.
+export function money(value: number | undefined, currency?: string) {
+  if (value === undefined || !Number.isFinite(value)) return "—";
+  try {
+    return new Intl.NumberFormat("pt-BR", {
+      style: "currency",
+      currency: currency && /^[A-Za-z]{3}$/.test(currency) ? currency : "BRL",
+    }).format(value);
+  } catch {
+    return value.toLocaleString("pt-BR");
+  }
+}
+// Lê o valor digitado no filtro de faturamento: "10000", "10.000", "10.000,50",
+// "1500.5" e "R$ 2.500". Vazio vale `undefined` (sem limite); texto que não é
+// número, ou negativo, vale `null` (inválido).
+export function parseMoney(text: string): number | undefined | null {
+  const cleaned = text.replace(/R\$|\s/gi, "");
+  if (!cleaned) return undefined;
+  let normalized = cleaned;
+  if (cleaned.includes(","))
+    normalized = cleaned.replace(/\./g, "").replace(",", ".");
+  else if (/^\d{1,3}(\.\d{3})+$/.test(cleaned))
+    normalized = cleaned.replace(/\./g, "");
+  if (!/^\d+(\.\d+)?$/.test(normalized)) return null;
+  const value = Number(normalized);
+  return Number.isFinite(value) && value <= 1e13 ? value : null;
+}
