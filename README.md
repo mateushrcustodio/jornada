@@ -1,6 +1,6 @@
 # Jornada CRM
 
-MVP instalável no Bitrix24 para acompanhar a jornada de negócios (`entityTypeId = 2`), com painel de gestão, timeline dentro do card e preferências locais. Next.js 16, React 19, TypeScript, App Router e CSS responsivo. Sem banco de dados, eventos, webhooks obrigatórios ou serviço externo de persistência.
+MVP instalável no Bitrix24 para acompanhar a jornada de negócios (`entityTypeId = 2`), com um painel de gestão, timeline dentro do card e preferências locais. Next.js 16, React 19, TypeScript, App Router e CSS responsivo. Sem banco de dados, eventos, webhooks obrigatórios ou serviço externo de persistência.
 
 O diretório original continha somente `especificacao-jornada-crm-bitrix24.md`. A especificação foi preservada. Nenhum protótipo visual estava disponível; a interface foi criada para este MVP.
 
