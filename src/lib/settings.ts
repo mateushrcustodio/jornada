@@ -41,6 +41,6 @@ export const filtersSchema = z
       f.opportunityMin <= f.opportunityMax,
   );
 export const sortSchema = z.object({
-  by: z.literal("opportunity"),
+  by: z.enum(["opportunity", "when"]),
   dir: z.enum(["asc", "desc"]),
 });

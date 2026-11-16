@@ -159,14 +159,23 @@ export function sortByOpportunity<T>(
   sort: MovementSort | undefined,
   value: (row: T) => number | undefined,
 ): T[] {
-  if (!sort) return rows;
+  if (sort?.by !== "opportunity") return rows;
   const factor = sort.dir === "asc" ? 1 : -1;
   return [...rows].sort((a, b) => factor * ((value(a) ?? 0) - (value(b) ?? 0)));
+}
+// Ordena pela data da movimentação. As listas já vêm da mais recente para a mais
+// antiga (data e ID decrescentes); "asc" é exatamente a ordem inversa.
+export function sortByWhen<T>(rows: T[], sort: MovementSort | undefined): T[] {
+  return sort?.by === "when" && sort.dir === "asc" ? [...rows].reverse() : rows;
 }
 export const sortMovements = (
   rows: Movement[],
   sort: MovementSort | undefined,
-) => sortByOpportunity(rows, sort, (row) => row.deal.opportunity);
+) =>
+  sortByWhen(
+    sortByOpportunity(rows, sort, (row) => row.deal.opportunity),
+    sort,
+  );
 export function buildDashboard(
   deals: Deal[],
   history: HistoryEntry[],

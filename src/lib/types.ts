@@ -66,10 +66,12 @@ export interface Filters {
   opportunityMin?: number;
   opportunityMax?: number;
 }
-// Ordenação opcional das Movimentações pelo faturamento do negócio.
+// Ordenação opcional das Movimentações: pelo faturamento do negócio ou pela
+// data da movimentação ("when": desc = mais recentes primeiro, que é a ordem
+// padrão; asc = mais antigas primeiro).
 export type SortDirection = "asc" | "desc";
 export interface MovementSort {
-  by: "opportunity";
+  by: "opportunity" | "when";
   dir: SortDirection;
 }
 export interface Visit {
@@ -90,6 +92,8 @@ export interface StalledDeal {
   enteredAt: string;
   duration: number;
   url?: string;
+  // Quem fez a última movimentação do negócio (coluna "Movido por").
+  actor?: string;
 }
 export interface Retention {
   stage: Stage;
