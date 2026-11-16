@@ -6,7 +6,7 @@ Leia este arquivo antes de mexer no código. Ele resume o que o projeto faz, ond
 
 ## O que é
 
-App para Bitrix24 (Academia CRM) que mostra a **jornada de um negócio**: por quais etapas o card já passou, quanto tempo ficou em cada uma e quem moveu. Repositório original: `github.com/mateushrcustodio/jornada` (Mateus). Quem pede as mudanças é o Vini, que trabalha com Bitrix24 e usa Mac.
+App para Bitrix24 (Academia CRM) que mostra a **jornada de um negócio**: por quais etapas o card já passou, quanto tempo ficou em cada uma e quem moveu. Repositório original: `github.com/mateushrcustodio/jornada` (Mateus). Vini pede mudanças na branch "Mudanças-Vinicius".
 
 Dois modos de uso, que compartilham o mesmo código:
 
