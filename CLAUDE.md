@@ -54,6 +54,7 @@ src/components/
   dashboard.tsx             todo o painel (Visão geral + 3 views), filtros, cache de 5 min no navegador;
                             Movimentações e Parados usam /api/dashboard/page (paginação controlada)
   stage-time-chart.tsx      aba Etapas: gráfico "Tempo médio no funil" + janela "Ver mais detalhes"
+  stage-pie.tsx             pizza do tempo médio + botão Colunas/Pizza (escolha em localStorage); chart-tip.tsx = dicas dos gráficos
   compact-journey.tsx       tela do card (timeline, estatísticas, autópsia)  [journey.tsx só reexporta]
   autopsy.tsx               ficha de negócio ganho/perdido
   use-resource.ts           fetch com cache em memória no navegador (cacheMs); refresh forçado ignora o cache
@@ -61,6 +62,7 @@ src/components/
 src/lib/
   types.ts, calculations.ts (passagens, jornada, painel), autopsy.ts, format.ts,
   stage-insights.ts (análise por etapa/responsável/faturamento a partir do painel; sem REST),
+  pie.ts (fatias da pizza: percentuais que somam 100,0%, cores fixas por etapa),
   settings.ts (preferências no localStorage), demo.ts (dados sintéticos), http.ts
   bitrix/
     client.ts   REST: limitador por portal, retry, batch, listAllBatched

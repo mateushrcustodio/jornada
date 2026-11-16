@@ -604,3 +604,48 @@ test("etapas mostram o tempo médio no funil e a análise detalhada", async ({
   await page.keyboard.press("Escape");
   await expect(dialog).toBeHidden();
 });
+
+test("etapas alternam o gráfico entre colunas e pizza", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/dashboard/stages");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  const panel = page.locator(".stage-time-panel");
+  await expect(panel.locator(".stage-column").first()).toBeVisible();
+  await expect(panel.locator(".pie-chart")).toHaveCount(0);
+  await panel.getByRole("button", { name: "Pizza" }).click();
+  await expect(panel.locator(".pie-chart")).toBeVisible();
+  await expect(panel.locator(".stage-column")).toHaveCount(0);
+  const slices = panel.locator(".pie-slice");
+  expect(await slices.count()).toBeGreaterThanOrEqual(2);
+  // Os percentuais da legenda somam 100,0%.
+  const shares = await panel.locator(".pie-legend-share").allTextContents();
+  const sum = shares
+    .map((text) => Number(text.replace("%", "").replace(",", ".")))
+    .reduce((a, b) => a + b, 0);
+  expect(Math.round(sum * 10) / 10).toBe(100);
+  await expect(panel.locator(".pie-note")).toContainText("soma dos tempos");
+  // A escolha vale também na janela de detalhes.
+  await panel.getByRole("button", { name: "Ver mais detalhes" }).click();
+  const dialog = page.getByRole("dialog", { name: "Tempo médio por etapa" });
+  await expect(dialog.locator(".pie-chart")).toBeVisible();
+  await expect(dialog.locator(".pie-table")).toContainText("Soma das etapas");
+  expect(
+    await page.evaluate(() => {
+      const body = document.querySelector(".insight-body")!;
+      return body.scrollWidth <= body.clientWidth;
+    }),
+  ).toBe(true);
+  await page.screenshot({
+    path: `docs/screenshots/stages-pie-${testInfo.project.name}.png`,
+  });
+  // Clicar numa linha da tabela seleciona a etapa.
+  await dialog.locator(".pie-table tbody tr").nth(1).click();
+  await expect(dialog.locator(".pie-table tbody tr").nth(1)).toHaveClass(
+    /is-selected/,
+  );
+  await dialog.getByRole("button", { name: "Colunas" }).click();
+  await expect(dialog.locator(".range-row").first()).toBeVisible();
+  await page.keyboard.press("Escape");
+  await expect(panel.locator(".stage-column").first()).toBeVisible();
+});
