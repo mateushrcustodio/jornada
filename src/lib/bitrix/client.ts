@@ -2,7 +2,7 @@ import "server-only";
 import type { RestResponse } from "../types";
 import { BitrixError } from "./errors";
 import { credentials, validateDomain } from "./config";
-import type { Session } from "./session";
+import { persistSessionCookie, type Session } from "./session";
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -122,6 +122,9 @@ async function refresh(session: Session) {
     session.refreshToken = token.refresh_token;
     session.tokenExpiresAt =
       Date.now() + Number(token.expires_in || 3600) * 1000;
+    // O refresh token antigo deixa de valer: o cookie precisa levar o novo
+    // para que as outras instâncias do servidor continuem funcionando.
+    await persistSessionCookie(session);
   })().finally(() => {
     session.refreshPending = undefined;
   });
