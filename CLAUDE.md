@@ -55,6 +55,7 @@ src/components/
                             Movimentações e Parados usam /api/dashboard/page (paginação controlada) e a mesma
                             `ReorderableTable` (colunas arrastáveis; setas de ordenação onde `sortKeys` indica)
   stage-time-chart.tsx      aba Etapas: gráfico "Tempo médio no funil" + janela "Ver mais detalhes"
+  stage-order.tsx           seletor Decrescente/Crescente/Funil da lista "Tempo médio por etapa" (aba Etapas; escolha em localStorage); regra de ordenação em lib/stage-order.ts
   stage-pie.tsx             pizza do tempo médio + botão Colunas/Pizza (escolha em localStorage); chart-tip.tsx = dicas dos gráficos
   column-drag.ts            hook de arrastar colunas (compartilhado por Movimentações e Parados); column-order.ts guarda a ordem
   compact-journey.tsx       tela do card (timeline, estatísticas, autópsia)  [journey.tsx só reexporta]

@@ -2374,6 +2374,10 @@ th.num-cell .th-inner {
   color: var(--ink);
   box-shadow: 0 0 0 1px var(--line);
 }
+/* Seletor de ordem da lista de etapas: em telas estreitas desce para a linha de baixo. */
+.retention-panel .panel-heading {
+  flex-wrap: wrap;
+}
 .mode-toggle button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
