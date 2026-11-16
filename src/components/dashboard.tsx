@@ -47,6 +47,7 @@ import {
 } from "@/lib/format";
 import { useColumnOrder } from "./column-order";
 import { useApp } from "./provider";
+import { StageTimePanel } from "./stage-time-chart";
 import { useResource } from "./use-resource";
 import {
   DealLink,
@@ -74,6 +75,7 @@ const subtitles = {
 // Filtros e consulta sobrevivem à troca de aba do painel (cada aba remonta
 // este componente). Depois de 5 minutos a consulta volta a ser buscada.
 const DASHBOARD_CACHE_MS = 5 * 60000;
+const NO_USERS: UserOption[] = [];
 const sticky: Record<string, unknown> = {};
 function useSticky<T>(key: string, initial: () => T) {
   const [value, setValue] = useState<T>(() =>
@@ -115,7 +117,7 @@ export function Dashboard({ view }: { view: View }) {
     ready,
     DASHBOARD_CACHE_MS,
   );
-  const users = usersResource.data ?? [];
+  const users = usersResource.data ?? NO_USERS;
   const minValue = parseMoney(oppMin);
   const maxValue = parseMoney(oppMax);
   const rangeError =
@@ -537,21 +539,29 @@ export function Dashboard({ view }: { view: View }) {
             <>
               <div className="split">
                 <RetentionChart rows={data.retention} full />
-                <Panel title="Como ler os tempos">
-                  <div className="analysis-explainer">
-                    <p>
-                      A média considera passagens com entrada no período. Cada
-                      passagem termina na próxima movimentação; uma etapa aberta
-                      vai até a consulta.
-                    </p>
-                    <p>
-                      Os contadores de negócios e parados representam a posição
-                      atual, inclusive sem movimentações recentes. Etapas
-                      concluídas de ganho ou perda têm duração final zero.
-                    </p>
-                    <p>Cada pipeline é calculado separadamente.</p>
-                  </div>
-                </Panel>
+                <div className="stack">
+                  <Panel title="Como ler os tempos">
+                    <div className="analysis-explainer">
+                      <p>
+                        A média considera passagens com entrada no período. Cada
+                        passagem termina na próxima movimentação; uma etapa
+                        aberta vai até a consulta.
+                      </p>
+                      <p>
+                        Os contadores de negócios e parados representam a
+                        posição atual, inclusive sem movimentações recentes.
+                        Etapas concluídas de ganho ou perda têm duração final
+                        zero.
+                      </p>
+                      <p>Cada pipeline é calculado separadamente.</p>
+                    </div>
+                  </Panel>
+                  <StageTimePanel
+                    data={data}
+                    users={users}
+                    stalledHours={settings.stalledHours}
+                  />
+                </div>
               </div>
               <RetentionTable rows={data.retention} />
             </>

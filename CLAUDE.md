@@ -6,7 +6,7 @@ Leia este arquivo antes de mexer no código. Ele resume o que o projeto faz, ond
 
 ## O que é
 
-App para Bitrix24 (Academia CRM) que mostra a **jornada de um negócio**: por quais etapas o card já passou, quanto tempo ficou em cada uma e quem moveu. Repositório original: `github.com/mateushrcustodio/jornada` (Mateus). Quem pede as mudanças é o Vini, que trabalha com Bitrix24 e usa Mac.
+App para Bitrix24 (Academia CRM) que mostra a **jornada de um negócio**: por quais etapas o card já passou, quanto tempo ficou em cada uma e quem moveu. Repositório original: `github.com/mateushrcustodio/jornada` (Mateus). Vini pede mudanças na branch "Mudanças-Vinicius".
 
 Dois modos de uso, que compartilham o mesmo código:
 
@@ -53,12 +53,14 @@ src/components/
   column-order.ts           ordem das colunas arrastáveis (localStorage)
   dashboard.tsx             todo o painel (Visão geral + 3 views), filtros, cache de 5 min no navegador;
                             Movimentações e Parados usam /api/dashboard/page (paginação controlada)
+  stage-time-chart.tsx      aba Etapas: gráfico "Tempo médio no funil" + janela "Ver mais detalhes"
   compact-journey.tsx       tela do card (timeline, estatísticas, autópsia)  [journey.tsx só reexporta]
   autopsy.tsx               ficha de negócio ganho/perdido
   use-resource.ts           fetch com cache em memória no navegador (cacheMs); refresh forçado ignora o cache
   provider.tsx, ui.tsx, settings-page.tsx, install-page.tsx
 src/lib/
   types.ts, calculations.ts (passagens, jornada, painel), autopsy.ts, format.ts,
+  stage-insights.ts (análise por etapa/responsável/faturamento a partir do painel; sem REST),
   settings.ts (preferências no localStorage), demo.ts (dados sintéticos), http.ts
   bitrix/
     client.ts   REST: limitador por portal, retry, batch, listAllBatched
