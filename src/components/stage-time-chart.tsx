@@ -8,7 +8,6 @@ import {
   X,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
 import type { DashboardData, UserOption } from "@/lib/types";
 import { dateTime, duration, money } from "@/lib/format";
 import {
@@ -20,6 +19,15 @@ import {
   type StageInsight,
   type StageInsights,
 } from "@/lib/stage-insights";
+import { buildStagePie, type PieModel } from "@/lib/pie";
+import { ChartTip, TipRows, useTip } from "./chart-tip";
+import {
+  ModeToggle,
+  PieChart,
+  formatShare,
+  useChartMode,
+  type PieView,
+} from "./stage-pie";
 import { DealLink, Empty, Panel, StageBadge } from "./ui";
 
 const HOUR = 3600000;
@@ -42,72 +50,33 @@ const count = (value: number) => value.toLocaleString("pt-BR");
 const plural = (n: number, one: string, many: string) =>
   `${count(n)} ${n === 1 ? one : many}`;
 
-// ---------- Dica flutuante (tooltip) compartilhada pelos gráficos ----------
-interface Tip {
-  x: number;
-  y: number;
-  content: ReactNode;
-}
-function useTip() {
-  const [tip, setTip] = useState<Tip | null>(null);
-  // A posição é relativa ao .chart-frame mais próximo da marca.
-  const show = (target: HTMLElement, content: ReactNode) => {
-    const box = target.closest(".chart-frame")?.getBoundingClientRect();
-    // Nas colunas, a dica nasce no topo da barra (e não do alvo inteiro).
-    const anchor =
-      target.querySelector<HTMLElement>(".stage-column-bar") ?? target;
-    const rect = anchor.getBoundingClientRect();
-    if (!box) return;
-    setTip({
-      x: Math.min(
-        Math.max(rect.left - box.left + rect.width / 2, 90),
-        box.width - 90,
-      ),
-      y: rect.top - box.top,
-      content,
-    });
-  };
-  const bind = (content: ReactNode) => ({
-    onPointerEnter: (e: React.PointerEvent<HTMLElement>) =>
-      show(e.currentTarget, content),
-    onPointerLeave: () => setTip(null),
-    onFocus: (e: React.FocusEvent<HTMLElement>) =>
-      show(e.currentTarget, content),
-    onBlur: () => setTip(null),
+// Dados das fatias: os mesmos números do gráfico de colunas, só em outra forma.
+function pieViews(
+  model: PieModel,
+  stages: StageInsight[],
+  stalledHours: number,
+): PieView[] {
+  const byKey = new Map(stages.map((stage) => [stage.key, stage]));
+  return model.slices.map((slice) => {
+    const stage = byKey.get(slice.key);
+    return {
+      ...slice,
+      display: duration(slice.value),
+      rows: slice.members
+        ? slice.members.map((m) => [m.label, duration(m.value)])
+        : stage
+          ? [
+              ["tempo médio", duration(stage.average)],
+              ["mediana", duration(stage.median)],
+              ["passagens", count(stage.passages)],
+              [`parados (${stalledHours}h+)`, count(stage.stalledDeals)],
+            ]
+          : [],
+    };
   });
-  return { tip, bind };
 }
-function ChartTip({ tip }: { tip: Tip | null }) {
-  if (!tip) return null;
-  return (
-    <div
-      className="chart-tip"
-      role="tooltip"
-      style={{ left: tip.x, top: tip.y }}
-    >
-      {tip.content}
-    </div>
-  );
-}
-function TipRows({
-  title,
-  rows,
-}: {
-  title: string;
-  rows: [string, ReactNode][];
-}) {
-  return (
-    <>
-      <span className="chart-tip-title">{title}</span>
-      {rows.map(([label, value]) => (
-        <span className="chart-tip-row" key={label}>
-          <strong>{value}</strong>
-          <span>{label}</span>
-        </span>
-      ))}
-    </>
-  );
-}
+const pieNote = (model: PieModel) =>
+  `Cada fatia é a parte de uma etapa na soma dos tempos médios (${duration(model.total)}), na ordem do funil, a partir das 12h. Etapas sem passagem no período não têm fatia.`;
 
 function PipelineTabs({
   insights,
@@ -159,6 +128,10 @@ export function StageTimePanel({
   const max = Math.max(1, ...timed.map((s) => s.average));
   const tip = useTip();
   const bottleneck = pipeline?.bottleneck;
+  const [chartMode, setChartMode] = useChartMode();
+  const model = buildStagePie(timed);
+  const pieOk = model.slices.length >= 2;
+  const mode = chartMode === "pie" && pieOk ? "pie" : "bars";
   return (
     <Panel title="Tempo médio no funil" className="stage-time-panel">
       {!pipeline || !timed.length ? (
@@ -186,58 +159,90 @@ export function StageTimePanel({
               "Nenhuma passagem com entrada no período; as etapas abaixo têm só negócios atuais."
             )}
           </p>
-          <div className="chart-frame">
-            <div
-              className="stage-columns"
-              role="list"
-              aria-label={`Tempo médio por etapa, ${pipeline.name}, na ordem do funil`}
-            >
-              {timed.map((s) => (
-                <div className="stage-column" role="listitem" key={s.key}>
-                  <button
-                    type="button"
-                    className="stage-column-hit"
-                    aria-label={`${s.stage.name}: ${s.passages ? `média de ${duration(s.average)} em ${plural(s.passages, "passagem", "passagens")}` : "sem passagens no período"}. Ver detalhes.`}
-                    onClick={() => setOpen({ stage: s.key })}
-                    {...tip.bind(
-                      <TipRows
-                        title={s.stage.name}
-                        rows={[
-                          [
-                            "tempo médio",
-                            s.passages ? duration(s.average) : "—",
-                          ],
-                          ["mediana", s.passages ? duration(s.median) : "—"],
-                          ["passagens", count(s.passages)],
-                          ["negócios", count(s.deals)],
-                          [
-                            `parados (${stalledHours}h+)`,
-                            count(s.stalledDeals),
-                          ],
-                        ]}
-                      />,
-                    )}
-                  >
-                    <span className="stage-column-value">
-                      {s.passages ? shortDuration(s.average) : "—"}
-                    </span>
-                    <span className="stage-column-plot">
-                      <span
-                        className="stage-column-bar"
-                        style={{
-                          height: `${Math.max(s.passages ? 2 : 0, (s.average / max) * 100)}%`,
-                        }}
-                      />
-                    </span>
-                  </button>
-                  <span className="stage-column-label" title={s.stage.name}>
-                    {s.stage.name}
-                  </span>
-                </div>
-              ))}
-            </div>
-            <ChartTip tip={tip.tip} />
+          <div className="chart-toolbar">
+            <span className="muted">
+              {mode === "pie"
+                ? "Participação de cada etapa no tempo somado"
+                : "Tempo médio de cada etapa"}
+            </span>
+            <ModeToggle
+              mode={mode}
+              onChange={setChartMode}
+              pieDisabled={!pieOk}
+            />
           </div>
+          {mode === "pie" ? (
+            <>
+              <PieChart
+                label={`Participação de cada etapa no tempo médio, ${pipeline.name}`}
+                slices={pieViews(model, timed, stalledHours)}
+                empty={model.empty.map((e) => ({
+                  key: e.key,
+                  label: e.stage.name,
+                }))}
+                onSelect={(key) => setOpen({ stage: key })}
+              />
+              <p className="pie-note">{pieNote(model)}</p>
+            </>
+          ) : (
+            <>
+              <div className="chart-frame">
+                <div
+                  className="stage-columns"
+                  role="list"
+                  aria-label={`Tempo médio por etapa, ${pipeline.name}, na ordem do funil`}
+                >
+                  {timed.map((s) => (
+                    <div className="stage-column" role="listitem" key={s.key}>
+                      <button
+                        type="button"
+                        className="stage-column-hit"
+                        aria-label={`${s.stage.name}: ${s.passages ? `média de ${duration(s.average)} em ${plural(s.passages, "passagem", "passagens")}` : "sem passagens no período"}. Ver detalhes.`}
+                        onClick={() => setOpen({ stage: s.key })}
+                        {...tip.bind(
+                          <TipRows
+                            title={s.stage.name}
+                            rows={[
+                              [
+                                "tempo médio",
+                                s.passages ? duration(s.average) : "—",
+                              ],
+                              [
+                                "mediana",
+                                s.passages ? duration(s.median) : "—",
+                              ],
+                              ["passagens", count(s.passages)],
+                              ["negócios", count(s.deals)],
+                              [
+                                `parados (${stalledHours}h+)`,
+                                count(s.stalledDeals),
+                              ],
+                            ]}
+                          />,
+                        )}
+                      >
+                        <span className="stage-column-value">
+                          {s.passages ? shortDuration(s.average) : "—"}
+                        </span>
+                        <span className="stage-column-plot">
+                          <span
+                            className="stage-column-bar"
+                            style={{
+                              height: `${Math.max(s.passages ? 2 : 0, (s.average / max) * 100)}%`,
+                            }}
+                          />
+                        </span>
+                      </button>
+                      <span className="stage-column-label" title={s.stage.name}>
+                        {s.stage.name}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+                <ChartTip tip={tip.tip} />
+              </div>
+            </>
+          )}
           <div className="stage-time-footer">
             <span>
               Média do funil <strong>{duration(pipeline.average)}</strong> ·{" "}
@@ -316,6 +321,10 @@ function StageTimeDialog({
     timed.find((s) => s.passages) ??
     timed[0];
   const cur = insights.currency;
+  const [chartMode, setChartMode] = useChartMode();
+  const model = buildStagePie(timed);
+  const pieOk = model.slices.length >= 2;
+  const mode = chartMode === "pie" && pieOk ? "pie" : "bars";
   return (
     <dialog
       ref={ref}
@@ -395,17 +404,49 @@ function StageTimeDialog({
 
           <section className="insight-section">
             <div className="insight-section-heading">
-              <h3>Tempo em cada etapa, na ordem do funil</h3>
-              <RangeLegend />
+              <h3>
+                {mode === "pie"
+                  ? "Participação de cada etapa no tempo do funil"
+                  : "Tempo em cada etapa, na ordem do funil"}
+              </h3>
+              <div className="insight-section-tools">
+                {mode === "bars" && <RangeLegend />}
+                <ModeToggle
+                  mode={mode}
+                  onChange={setChartMode}
+                  pieDisabled={!pieOk}
+                />
+              </div>
             </div>
-            <RangeChart
-              stages={timed}
-              selected={selected?.key}
-              onSelect={setChosen}
-            />
+            {mode === "pie" ? (
+              <div className="pie-detail">
+                <PieChart
+                  label={`Participação de cada etapa no tempo médio, ${pipeline.name}`}
+                  slices={pieViews(model, timed, stalledHours)}
+                  selected={selected?.key}
+                  onSelect={setChosen}
+                />
+                <PieTable
+                  stages={timed}
+                  model={model}
+                  pipeline={pipeline}
+                  currency={cur}
+                  selected={selected?.key}
+                  onSelect={setChosen}
+                />
+              </div>
+            ) : (
+              <RangeChart
+                stages={timed}
+                selected={selected?.key}
+                onSelect={setChosen}
+              />
+            )}
             <p className="insight-hint">
-              Clique numa etapa para ver responsáveis, faturamento e os negócios
-              que mais demoraram.
+              Clique {mode === "pie" ? "numa fatia ou linha" : "numa etapa"}{" "}
+              para ver responsáveis, faturamento e os negócios que mais
+              demoraram.
+              {mode === "pie" && ` ${pieNote(model)}`}
             </p>
           </section>
 
@@ -439,6 +480,131 @@ function StageTimeDialog({
         </div>
       </div>
     </dialog>
+  );
+}
+
+// Tabela ao lado da pizza: cada fatia com os números por trás dela.
+function PieTable({
+  stages,
+  model,
+  pipeline,
+  currency,
+  selected,
+  onSelect,
+}: {
+  stages: StageInsight[];
+  model: PieModel;
+  pipeline: PipelineInsight;
+  currency: string;
+  selected?: string;
+  onSelect: (key: string) => void;
+}) {
+  const share = new Map(model.slices.map((slice) => [slice.key, slice.share]));
+  const tail = model.slices.find((slice) => slice.members);
+  const shareOf = (stage: StageInsight) => {
+    const own = share.get(stage.key);
+    if (own !== undefined) return formatShare(own);
+    // Etapa que entrou em "Outras etapas": a parte dela, sobre o total, em %.
+    return stage.passages > 0 && stage.average > 0 && tail
+      ? formatShare((stage.average / model.total) * 100)
+      : "—";
+  };
+  return (
+    <div className="table-scroll">
+      <table className="pie-table">
+        <thead>
+          <tr>
+            <th>Etapa</th>
+            <th>Tempo médio</th>
+            <th>% do tempo</th>
+            <th>Mediana</th>
+            <th>Maior tempo</th>
+            <th>Passagens</th>
+            <th>Parados</th>
+            <th>Faturamento</th>
+            <th>Mais lento</th>
+          </tr>
+        </thead>
+        <tbody>
+          {stages.map((stage) => {
+            const slowest = stage.assignees[0];
+            const has = stage.passages > 0;
+            return (
+              <tr
+                key={stage.key}
+                className={stage.key === selected ? "is-selected" : undefined}
+                onClick={() => onSelect(stage.key)}
+              >
+                <td>
+                  <button
+                    type="button"
+                    className="pie-row-button"
+                    aria-pressed={stage.key === selected}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelect(stage.key);
+                    }}
+                  >
+                    <i
+                      className={`pie-swatch ${has ? "" : "is-empty"}`}
+                      style={
+                        has
+                          ? { background: model.colors.get(stage.key) }
+                          : undefined
+                      }
+                    />
+                    {stage.stage.name}
+                  </button>
+                </td>
+                <td>
+                  <strong>{has ? duration(stage.average) : "—"}</strong>
+                </td>
+                <td>{has ? shareOf(stage) : "—"}</td>
+                <td>{has ? duration(stage.median) : "—"}</td>
+                <td>{has ? duration(stage.maximum) : "—"}</td>
+                <td>{has ? count(stage.passages) : "—"}</td>
+                <td>
+                  {stage.stalledDeals ? (
+                    <span className="status-inline duration-critical">
+                      <Pause size={13} aria-hidden />
+                      {count(stage.stalledDeals)}
+                    </span>
+                  ) : (
+                    <span className="muted">0</span>
+                  )}
+                </td>
+                <td>{has ? money(stage.revenue, currency) : "—"}</td>
+                <td>
+                  {has && slowest ? (
+                    <>
+                      {slowest.name}{" "}
+                      <span className="muted">
+                        ({shortDuration(slowest.average)})
+                      </span>
+                    </>
+                  ) : (
+                    "—"
+                  )}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>Soma das etapas</th>
+            <th>{duration(model.total)}</th>
+            <th>{model.slices.length ? "100,0%" : "—"}</th>
+            <td />
+            <td />
+            <th>{count(pipeline.passages)}</th>
+            <th>{count(pipeline.stalledDeals)}</th>
+            <td />
+            <td />
+          </tr>
+        </tfoot>
+      </table>
+    </div>
   );
 }
 
