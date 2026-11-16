@@ -580,7 +580,10 @@ export function Dashboard({ view }: { view: View }) {
                   />
                 </div>
               </div>
-              <RetentionTable rows={data.retention} />
+              <RetentionTable
+                rows={data.retention}
+                pipelines={data.pipelines}
+              />
             </>
           )}
         </div>
@@ -1339,12 +1342,34 @@ function Stalled({
   );
 }
 
-function RetentionTable({ rows }: { rows: Retention[] }) {
+function RetentionTable({
+  rows: unsorted,
+  pipelines,
+}: {
+  rows: Retention[];
+  pipelines: Pipeline[];
+}) {
+  // Mesma escolha da lista "Tempo médio por etapa": as duas seguem juntas.
+  const [order, setOrder] = useStageOrder();
+  const rows = sortRetention(unsorted, order, pipelines);
   const [requestedPage, setPage] = useState(1);
   const size = 10,
     page = Math.min(requestedPage, Math.max(1, Math.ceil(rows.length / size)));
   return (
-    <Panel title="Detalhamento por etapa">
+    <Panel
+      title="Detalhamento por etapa"
+      action={
+        rows.length > 1 && (
+          <StageOrderToggle
+            order={order}
+            onChange={(next) => {
+              setOrder(next);
+              setPage(1);
+            }}
+          />
+        )
+      }
+    >
       {!rows.length ? (
         <Empty />
       ) : (
