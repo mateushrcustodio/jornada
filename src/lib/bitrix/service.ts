@@ -24,6 +24,7 @@ import {
   matchesDealFilters,
   resolveStage,
   sortByOpportunity,
+  sortByWhen,
   sortMovements,
   stageFilters,
 } from "../calculations";
@@ -969,6 +970,7 @@ async function readMovementBlock(
   session: Session,
   filters: Filters,
   page: number,
+  oldestFirst = false,
 ): Promise<{ rows: HistoryEntry[]; total: number; page: number }> {
   const read = (requested: number) => {
     const start =
@@ -983,8 +985,11 @@ async function readMovementBlock(
           "<=CREATED_TIME": filters.to,
         },
         select: historySelect,
-        // Mesma ordem do painel completo: mais recentes primeiro.
-        order: { CREATED_TIME: "DESC", ID: "DESC" },
+        // Mesma ordem do painel completo (mais recentes primeiro); com a
+        // ordenação "Quando" crescente, a ordem inversa exata.
+        order: oldestFirst
+          ? { CREATED_TIME: "ASC", ID: "ASC" }
+          : { CREATED_TIME: "DESC", ID: "DESC" },
       },
       "items",
       start,
@@ -1031,8 +1036,10 @@ export async function getMovementsPage(
   const session = await getSession();
   const { enabledStage } = stageFilters(filters, settings);
   // Responsável, faturamento e ordenação por faturamento dependem do negócio,
-  // que o histórico não traz: nesses casos lê-se o período inteiro.
-  const dealScoped = hasDealFilters(filters) || sort !== undefined;
+  // que o histórico não traz: nesses casos lê-se o período inteiro. A ordenação
+  // por data ("Quando") só usa o histórico e não exige isso.
+  const dealScoped = hasDealFilters(filters) || sort?.by === "opportunity";
+  const oldestFirst = sort?.by === "when" && sort.dir === "asc";
   const unfiltered =
     filters.pipeline === undefined &&
     !filters.stage &&
@@ -1053,7 +1060,12 @@ export async function getMovementsPage(
   catalogRead.catch(() => undefined);
   if (unfiltered) {
     try {
-      const block = await readMovementBlock(session, filters, page);
+      const block = await readMovementBlock(
+        session,
+        filters,
+        page,
+        oldestFirst,
+      );
       pageRows = block.rows;
       result.total = block.total;
       result.page = block.page;
@@ -1083,6 +1095,7 @@ export async function getMovementsPage(
         (row) => periodDeals.get(row.OWNER_ID)?.opportunity,
       );
     }
+    matching = sortByWhen(matching, sort);
     result.total = matching.length;
     result.page = clampPage(page, matching.length);
     pageRows = matching.slice(
@@ -1133,6 +1146,37 @@ export async function getMovementsPage(
       });
   }
   return result;
+}
+
+// Nomes de "Movido por" (último movimento do negócio) e "Pessoa responsável"
+// das linhas de uma página de Parados. Só consulta user.get para quem ainda não
+// está nos nomes guardados na sessão; falha de permissão deixa os nomes vazios.
+async function withStalledNames(
+  session: Session,
+  rows: StalledDeal[],
+): Promise<StalledDeal[]> {
+  if (!rows.length) return rows;
+  const deals = rows.map((row) => row.deal);
+  await resolveHistoryActors(
+    session,
+    [],
+    deals,
+    deals.map((deal) => Number(deal.assignedById)),
+  );
+  const names = session.userNames;
+  return rows.map((row) => {
+    const { movedBy, assignedById } = row.deal;
+    return {
+      ...row,
+      actor: row.actor || (movedBy ? names?.get(movedBy) : undefined),
+      deal: {
+        ...row.deal,
+        assignedByName:
+          row.deal.assignedByName ||
+          (assignedById ? names?.get(assignedById) : undefined),
+      },
+    };
+  });
 }
 
 // Filtro REST dos negócios parados, equivalente às regras do painel completo:
@@ -1190,7 +1234,21 @@ export async function getStalledPage(
       now,
       true,
     );
-    return { ...sliceRows(full.stalled, page), demo: true };
+    // "Movido por": quem fez a última movimentação de cada negócio no histórico.
+    const latest = new Map<number, HistoryEntry>();
+    for (const entry of data.history) {
+      const previous = latest.get(entry.OWNER_ID);
+      if (
+        !previous ||
+        Date.parse(entry.CREATED_TIME) >= Date.parse(previous.CREATED_TIME)
+      )
+        latest.set(entry.OWNER_ID, entry);
+    }
+    const rows = full.stalled.map((row) => ({
+      ...row,
+      actor: latest.get(row.deal.id)?.MOVED_BY_NAME,
+    }));
+    return { ...sliceRows(rows, page), demo: true };
   }
   const session = await getSession();
   try {
@@ -1247,7 +1305,7 @@ export async function getStalledPage(
         url: dealUrl(session.domain, deal.id),
       }));
     return {
-      rows,
+      rows: await withStalledNames(session, rows),
       total,
       page: current,
       pageSize: PAGE_SIZE,
@@ -1261,8 +1319,10 @@ export async function getStalledPage(
     // Se o portal não aceitar o filtro por movedTime, calcula pelo caminho
     // completo (mais lento, mas igual ao painel) e entrega a página pedida.
     const full = await getDashboard(filters, settings);
+    const fallback = sliceRows(full.stalled, page);
     return {
-      ...sliceRows(full.stalled, page),
+      ...fallback,
+      rows: await withStalledNames(session, fallback.rows),
       warning: full.warning,
       partial: full.partial,
     };

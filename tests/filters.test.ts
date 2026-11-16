@@ -3,6 +3,7 @@ import {
   hasDealFilters,
   matchesDealFilters,
   sortByOpportunity,
+  sortByWhen,
 } from "@/lib/calculations";
 import { money, parseMoney } from "@/lib/format";
 import { filtersSchema, sortSchema } from "@/lib/settings";
@@ -75,6 +76,7 @@ describe("filtros por negócio", () => {
     expect(
       sortSchema.safeParse({ by: "opportunity", dir: "desc" }).success,
     ).toBe(true);
+    expect(sortSchema.safeParse({ by: "when", dir: "asc" }).success).toBe(true);
     expect(sortSchema.safeParse({ by: "title", dir: "desc" }).success).toBe(
       false,
     );
@@ -99,6 +101,29 @@ describe("ordenação por faturamento", () => {
       );
     expect(sort("desc")).toEqual(["c", "a", "d", "b"]);
     expect(sort("asc")).toEqual(["b", "a", "d", "c"]);
+  });
+});
+
+describe("ordenação por data (Quando)", () => {
+  // Lista já da mais recente para a mais antiga, como as Movimentações chegam.
+  const rows = ["novo", "meio", "antigo"];
+  it("sem ordenação e decrescente mantêm a ordem (mais recentes primeiro)", () => {
+    expect(sortByWhen(rows, undefined)).toBe(rows);
+    expect(sortByWhen(rows, { by: "when", dir: "desc" })).toBe(rows);
+  });
+  it("crescente inverte a lista sem alterar a original", () => {
+    expect(sortByWhen(rows, { by: "when", dir: "asc" })).toEqual([
+      "antigo",
+      "meio",
+      "novo",
+    ]);
+    expect(rows).toEqual(["novo", "meio", "antigo"]);
+  });
+  it("a ordenação por faturamento não mexe na por data, e vice-versa", () => {
+    expect(sortByWhen(rows, { by: "opportunity", dir: "asc" })).toBe(rows);
+    expect(
+      sortByOpportunity(rows, { by: "when", dir: "asc" }, () => 1),
+    ).toBe(rows);
   });
 });
 

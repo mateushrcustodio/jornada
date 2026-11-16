@@ -566,6 +566,176 @@ test("Movimentações: arrastar pelo texto do título funciona e um clique não 
     "Pessoa responsável",
   ]);
 });
+// Datas (ms) da coluna "Quando" da página aberta, lidas do <time datetime>.
+const whenStamps = (page: import("@playwright/test").Page) =>
+  page.evaluate(() =>
+    [...document.querySelectorAll('tbody td[data-column="when"] time')].map(
+      (time) => Date.parse(time.getAttribute("datetime") ?? ""),
+    ),
+  );
+const isOrdered = (values: number[], dir: "asc" | "desc") =>
+  values.length > 1 &&
+  values.every(
+    (v, i) => !i || (dir === "asc" ? values[i - 1] <= v : values[i - 1] >= v),
+  );
+
+test("Movimentações: seta de Quando alterna da mais antiga para a mais recente e o contrário", async ({
+  page,
+}) => {
+  await page.goto("/dashboard/movements");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await expect
+    .poll(async () => (await whenStamps(page)).length)
+    .toBeGreaterThan(1);
+  const header = page.locator("th", { hasText: "Quando" });
+  await expect(header).toHaveAttribute("aria-sort", "none");
+  // Sem ordenação escolhida, a lista já vem da mais recente para a mais antiga.
+  await expect
+    .poll(async () => isOrdered(await whenStamps(page), "desc"))
+    .toBe(true);
+  const newest = (await whenStamps(page))[0];
+  const sortButton = header.locator(".sort-button");
+  // Primeiro clique: da mais antiga para a mais recente, em todas as páginas.
+  await sortButton.click();
+  await expect(header).toHaveAttribute("aria-sort", "ascending");
+  await expect
+    .poll(async () => isOrdered(await whenStamps(page), "asc"))
+    .toBe(true);
+  const firstAsc = await whenStamps(page);
+  expect(firstAsc[0]).toBeLessThan(newest);
+  await page.getByRole("button", { name: "Próxima página" }).click();
+  await expect(page.locator(".pagination")).toContainText("Página 2");
+  await expect
+    .poll(async () => (await whenStamps(page))[0])
+    .toBeGreaterThanOrEqual(firstAsc.at(-1)!);
+  expect(isOrdered(await whenStamps(page), "asc")).toBe(true);
+  // Segundo clique: volta à mais recente primeiro (e à primeira página).
+  await sortButton.click();
+  await expect(header).toHaveAttribute("aria-sort", "descending");
+  await expect(page.locator(".pagination")).toContainText("Página 1");
+  await expect
+    .poll(async () => (await whenStamps(page))[0])
+    .toBe(newest);
+  expect(isOrdered(await whenStamps(page), "desc")).toBe(true);
+  await sortButton.click();
+  await expect(header).toHaveAttribute("aria-sort", "ascending");
+  // Só uma ordenação por vez: escolher Faturamento solta a de Quando.
+  await page
+    .locator("th", { hasText: "Faturamento" })
+    .locator(".sort-button")
+    .click();
+  await expect(
+    page.locator("th", { hasText: "Faturamento" }),
+  ).toHaveAttribute("aria-sort", "descending");
+  await expect(header).toHaveAttribute("aria-sort", "none");
+  // "Limpar" volta à ordem padrão.
+  await page.getByRole("button", { name: "Limpar" }).click();
+  await expect(
+    page.locator("th", { hasText: "Faturamento" }),
+  ).toHaveAttribute("aria-sort", "none");
+});
+
+const STALLED_COLUMNS = [
+  "Negócio",
+  "Pipeline",
+  "Etapa atual",
+  "Tempo parado",
+  "Movido por",
+  "Pessoa responsável",
+  "Faturamento",
+];
+
+test("Parados: mesmas colunas de Movimentações, sem Quando, com os dados de cada uma", async ({
+  page,
+}) => {
+  await page.goto("/dashboard/stalled");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await expect(page.locator("thead th")).toHaveText(STALLED_COLUMNS);
+  await expect(page.locator("thead th", { hasText: "Quando" })).toHaveCount(0);
+  await expect(page.locator("thead .sort-button")).toHaveCount(0);
+  const rows = page.locator("tbody tr");
+  await expect(rows.first()).toBeVisible();
+  for (const name of ["Pipeline", "Movido por", "Pessoa responsável"])
+    expect((await column(page, name)).every((v) => v.length > 0)).toBe(true);
+  expect((await column(page, "Faturamento")).every((v) => /\d/.test(v))).toBe(
+    true,
+  );
+  expect(
+    (await column(page, "Tempo parado")).every((v) => /\d/.test(v)),
+  ).toBe(true);
+});
+
+test("Parados: colunas se reorganizam pelo teclado e a ordem fica salva", async ({
+  page,
+}) => {
+  await page.goto("/dashboard/stalled");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await expect(page.locator("thead th")).toHaveText(STALLED_COLUMNS);
+  await page.getByRole("button", { name: "Mover coluna Faturamento" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  await page.keyboard.press("ArrowLeft");
+  const moved = [
+    "Negócio",
+    "Pipeline",
+    "Etapa atual",
+    "Tempo parado",
+    "Faturamento",
+    "Movido por",
+    "Pessoa responsável",
+  ];
+  await expect(page.locator("thead th")).toHaveText(moved);
+  // Os valores acompanham o título.
+  expect((await column(page, "Faturamento")).every((v) => /\d/.test(v))).toBe(
+    true,
+  );
+  await page.reload();
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await expect(page.locator("thead th")).toHaveText(moved);
+  // A ordem de Parados é independente da de Movimentações.
+  await page.goto("/dashboard/movements");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await expect(page.locator("thead th")).toHaveText(DEFAULT_COLUMNS);
+  await page.goto("/dashboard/stalled");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await page.getByRole("button", { name: "Restaurar colunas" }).click();
+  await expect(page.locator("thead th")).toHaveText(STALLED_COLUMNS);
+  await expect(
+    page.getByRole("button", { name: "Restaurar colunas" }),
+  ).toHaveCount(0);
+});
+
+test("Parados: arrastar pelo texto do título troca a coluna de lugar", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop", "arraste com mouse");
+  await page.goto("/dashboard/stalled");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await expect(page.locator("thead th")).toHaveText(STALLED_COLUMNS);
+  const label = (await page
+    .locator("th", { hasText: "Faturamento" })
+    .getByText("Faturamento")
+    .boundingBox())!;
+  const first = (await page
+    .locator("th", { hasText: "Negócio" })
+    .boundingBox())!;
+  await page.mouse.move(label.x + 5, label.y + label.height / 2);
+  await page.mouse.down();
+  await page.mouse.move(first.x + 20, first.y + first.height / 2, {
+    steps: 12,
+  });
+  await page.mouse.up();
+  await expect(page.locator("thead th")).toHaveText([
+    "Faturamento",
+    "Negócio",
+    "Pipeline",
+    "Etapa atual",
+    "Tempo parado",
+    "Movido por",
+    "Pessoa responsável",
+  ]);
+  await expect(page.locator(".col-dragged, .col-shift")).toHaveCount(0);
+});
+
 test("etapas mostram o tempo médio no funil e a análise detalhada", async ({
   page,
 }, testInfo) => {

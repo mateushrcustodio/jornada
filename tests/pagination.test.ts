@@ -57,11 +57,14 @@ afterEach(() => {
 const open = () =>
   createFakeBitrix({ now: NOW, deals: 400, forbidden: () => false });
 const ids = (rows: { entry: { ID: number } }[]) => rows.map((r) => r.entry.ID);
-// O nome do responsável só é resolvido onde a tela o mostra (Movimentações).
-const withoutClock = (value: unknown) =>
+// O nome do responsável só é resolvido onde a tela o mostra (Movimentações e
+// Parados); "actor" de Parados vem de fontes diferentes no painel completo.
+const withoutClock = (value: unknown, ignore: string[] = []) =>
   JSON.parse(
     JSON.stringify(value, (k, v) =>
-      k === "queriedAt" || k === "assignedByName" ? undefined : v,
+      k === "queriedAt" || k === "assignedByName" || ignore.includes(k)
+        ? undefined
+        : v,
     ),
   );
 
@@ -323,6 +326,49 @@ describe("Movimentações por responsável, faturamento e ordenação", () => {
           Date.parse(desc.rows[i - 1].entry.CREATED_TIME),
         ).toBeGreaterThanOrEqual(Date.parse(desc.rows[i].entry.CREATED_TIME));
   });
+  it("ordena todas as páginas pela data: crescente é o inverso exato da padrão", async () => {
+    const fake = open();
+    vi.stubGlobal("fetch", fake.fetch);
+    // Sem filtros: o Bitrix24 devolve cada bloco já na ordem pedida.
+    const full = await service.getDashboard(filters, DEFAULT_SETTINGS);
+    const asc = await allMovements(filters, { by: "when", dir: "asc" });
+    expect(asc.first.total).toBe(full.movements.length);
+    expect(ids(asc.rows)).toEqual(ids(full.movements).reverse());
+    const desc = await allMovements(filters, { by: "when", dir: "desc" });
+    expect(ids(desc.rows)).toEqual(ids(full.movements));
+    const times = asc.rows.map((r) => Date.parse(r.entry.CREATED_TIME));
+    expect(times).toEqual([...times].sort((a, b) => a - b));
+    // Com filtro: a lista do período é lida de uma vez e invertida na sessão.
+    const scoped = { ...filters, pipeline: 3 };
+    const fullScoped = await service.getDashboard(scoped, DEFAULT_SETTINGS);
+    const ascScoped = await allMovements(scoped, { by: "when", dir: "asc" });
+    expect(ascScoped.first.total).toBe(fullScoped.movements.length);
+    expect(ids(ascScoped.rows)).toEqual(ids(fullScoped.movements).reverse());
+    // Responsável e faturamento também combinam com a ordenação por data.
+    const people = { ...filters, assignedById: 3, opportunityMin: 10000 };
+    const fullPeople = await service.getDashboard(people, DEFAULT_SETTINGS);
+    const ascPeople = await allMovements(people, { by: "when", dir: "asc" });
+    expect(ids(ascPeople.rows)).toEqual(ids(fullPeople.movements).reverse());
+  });
+  it("ordenar por data sem filtro não varre o período (só o bloco da página)", async () => {
+    const fake = createFakeBitrix({
+      now: NOW,
+      deals: 3000,
+      forbidden: () => false,
+    });
+    vi.stubGlobal("fetch", fake.fetch);
+    const page = await service.getMovementsPage(
+      filters,
+      DEFAULT_SETTINGS,
+      1,
+      undefined,
+      { by: "when", dir: "asc" },
+    );
+    expect(page.rows.length).toBe(PAGE_SIZE);
+    expect(fake.stats.hits).toBeLessThanOrEqual(5);
+    const times = page.rows.map((r) => Date.parse(r.entry.CREATED_TIME));
+    expect(times).toEqual([...times].sort((a, b) => a - b));
+  });
   it("mostra o nome do responsável e o valor de cada linha", async () => {
     const fake = open();
     vi.stubGlobal("fetch", fake.fetch);
@@ -472,12 +518,42 @@ describe("Parados sob demanda", () => {
     expect(page.rows.map((r) => r.deal.id)).toEqual(
       full.stalled.slice(0, PAGE_SIZE).map((r) => r.deal.id),
     );
-    expect(withoutClock(page.rows)).toEqual(
-      withoutClock(full.stalled.slice(0, PAGE_SIZE)),
+    expect(withoutClock(page.rows, ["actor"])).toEqual(
+      withoutClock(full.stalled.slice(0, PAGE_SIZE), ["actor"]),
     );
-    // Nenhuma leitura de histórico: só uma lista de negócios.
-    expect(fake.stats.hits).toBe(1);
+    // Nenhuma leitura de histórico: uma lista de negócios e, no máximo, um lote
+    // com os nomes de "Movido por" e "Pessoa responsável".
+    expect(fake.stats.hits).toBeLessThanOrEqual(2);
+    expect(fake.stats.byMethod["crm.item.list"]).toBe(1);
     expect(fake.stats.byMethod["crm.stagehistory.list"]).toBeUndefined();
+  });
+  it("mostra quem fez a última movimentação e a pessoa responsável", async () => {
+    const fake = open();
+    vi.stubGlobal("fetch", fake.fetch);
+    const settings = { ...DEFAULT_SETTINGS, stalledHours: 1 };
+    const page = await service.getStalledPage(filters, settings, 1);
+    expect(page.rows.length).toBeGreaterThan(0);
+    for (const row of page.rows) {
+      expect(row.deal.assignedByName).toBe(`Pessoa ${row.deal.assignedById}`);
+      if (row.deal.movedBy) expect(row.actor).toBe(`Pessoa ${row.deal.movedBy}`);
+      else expect(row.actor).toBeUndefined();
+    }
+    expect(page.rows.some((row) => row.actor)).toBe(true);
+    // Sem permissão em user.get a página continua, só sem os nomes.
+    const denied = async (input: string | URL | Request, init?: RequestInit) => {
+      const body = String(init?.body ?? "");
+      if (body.includes("user.get"))
+        return new Response(
+          JSON.stringify({ error: "ACCESS_DENIED", error_description: "" }),
+          { status: 403, headers: { "Content-Type": "application/json" } },
+        );
+      return fake.fetch(input, init);
+    };
+    current.session!.userNames = undefined;
+    vi.stubGlobal("fetch", denied);
+    const blind = await service.getStalledPage(filters, settings, 1);
+    expect(blind.total).toBe(page.total);
+    expect(blind.rows.every((row) => !row.actor)).toBe(true);
   });
   it("lê blocos de 50 do Bitrix24 e entrega páginas de 10 em sequência", async () => {
     const fake = open();
@@ -488,6 +564,7 @@ describe("Parados sob demanda", () => {
     await service.getCatalog(current.session!);
     const collected: { id: number; duration: number }[] = [];
     fake.stats.hits = 0;
+    fake.stats.byMethod = {};
     for (
       let page = 1;
       page <= Math.ceil(full.stalled.length / PAGE_SIZE);
@@ -506,8 +583,12 @@ describe("Parados sob demanda", () => {
     expect(collected.map((r) => r.id).sort((a, b) => a - b)).toEqual(
       full.stalled.map((r) => r.deal.id).sort((a, b) => a - b),
     );
-    // Uma chamada por página (50 por bloco), sem nenhuma leitura extra.
-    expect(fake.stats.hits).toBe(Math.ceil(full.stalled.length / PAGE_SIZE));
+    // Uma chamada por página (50 por bloco), sem leitura de histórico. Os nomes
+    // ficam na sessão: só pessoas ainda desconhecidas geram um lote a mais.
+    const pages = Math.ceil(full.stalled.length / PAGE_SIZE);
+    expect(fake.stats.byMethod["crm.item.list"]).toBe(pages);
+    expect(fake.stats.byMethod["crm.stagehistory.list"]).toBeUndefined();
+    expect(fake.stats.hits).toBeLessThanOrEqual(pages + 5);
   });
   it("aplica pipeline e etapas ignoradas como o painel completo", async () => {
     const fake = open();
