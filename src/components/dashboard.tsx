@@ -37,6 +37,7 @@ import type {
   View,
 } from "@/lib/types";
 import { PAGE_SIZE } from "@/lib/types";
+import { sortRetention } from "@/lib/stage-order";
 import {
   dateTime,
   duration,
@@ -47,6 +48,7 @@ import {
 import { useColumnDrag } from "./column-drag";
 import { useColumnOrder } from "./column-order";
 import { useApp } from "./provider";
+import { StageOrderToggle, useStageOrder } from "./stage-order";
 import { StageTimePanel } from "./stage-time-chart";
 import { useResource } from "./use-resource";
 import {
@@ -549,7 +551,11 @@ export function Dashboard({ view }: { view: View }) {
           {view === "stages" && (
             <>
               <div className="split">
-                <RetentionChart rows={data.retention} full />
+                <RetentionChart
+                  rows={data.retention}
+                  pipelines={data.pipelines}
+                  full
+                />
                 <div className="stack">
                   <Panel title="Como ler os tempos">
                     <div className="analysis-explainer">
@@ -701,18 +707,29 @@ function Metrics({ data }: { data: DashboardData }) {
 
 function RetentionChart({
   rows,
+  pipelines = [],
   full = false,
 }: {
   rows: Retention[];
+  pipelines?: Pipeline[];
   full?: boolean;
 }) {
-  const visible = full ? rows : rows.slice(0, 4);
+  const [order, setOrder] = useStageOrder();
+  // Na visão geral só aparecem as 4 etapas mais lentas (ordem fixa); a ordem
+  // escolhida vale na aba Etapas, que lista todas.
+  const visible = full
+    ? sortRetention(rows, order, pipelines)
+    : rows.slice(0, 4);
   const max = Math.max(1, ...visible.map((r) => r.average));
   return (
     <Panel
       title="Tempo médio por etapa"
       action={
-        !full && (
+        full ? (
+          rows.length > 1 && (
+            <StageOrderToggle order={order} onChange={setOrder} />
+          )
+        ) : (
           <Link
             href="/dashboard/stages"
             className="icon-button"
