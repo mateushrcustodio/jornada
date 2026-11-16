@@ -7,6 +7,7 @@ import {
   cookieOptions,
   openSession,
   SESSION_COOKIE,
+  sessionCookieValue,
   type Session,
 } from "@/lib/bitrix/session";
 import { BitrixError } from "@/lib/bitrix/errors";
@@ -69,7 +70,11 @@ export async function GET(request: Request) {
       new URL("/dashboard", appUrl()),
       303,
     );
-    response.cookies.set(SESSION_COOKIE, session.id, cookieOptions());
+    response.cookies.set(
+      SESSION_COOKIE,
+      sessionCookieValue(session),
+      cookieOptions(),
+    );
     response.headers.set("Cache-Control", "no-store");
     return response;
   } catch (error) {

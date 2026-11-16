@@ -22,7 +22,9 @@ vi.mock("@/lib/bitrix/session", async (importOriginal) => ({
 }));
 const service = await import("@/lib/bitrix/service");
 const { POST: placement } = await import("@/app/api/bitrix/placement/route");
-const { sessions } = await import("@/lib/bitrix/session");
+const { sessions, sessionIdFromCookieValue } = await import(
+  "@/lib/bitrix/session"
+);
 
 const DOMAIN = "example.bitrix24.com.br";
 const makeSession = (): Session => ({
@@ -452,7 +454,11 @@ describe("abertura pelo Bitrix24", () => {
     await session.catalogPending;
     expect(session.catalog?.data.pipelines).toHaveLength(2);
     const second = await open("2", cookie);
-    expect(second.headers.get("set-cookie")!.split(";")[0]).toBe(cookie);
+    // O valor criptografado muda a cada gravação; o ID da sessão não.
+    const value = (header: string) => header.split(";")[0].split("=")[1];
+    expect(
+      sessionIdFromCookieValue(value(second.headers.get("set-cookie")!)),
+    ).toBe(sessionIdFromCookieValue(value(cookie)));
     expect(sessions.size).toBe(1);
     expect(session.accessToken).toBe("access-2");
     const catalogCalls = fake.stats.byMethod["crm.category.list"];

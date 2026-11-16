@@ -19,7 +19,7 @@ Do painel, clicar num negócio abre `/deal/:id/journey?source=dashboard`. Nesse 
 
 ## Stack e comandos
 
-Next.js 16.4.5 (App Router, Turbopack), React 19, TypeScript, zod 4, vitest 4, Playwright, CSS puro em `src/app/globals.css`. Sem banco de dados: sessões e caches ficam em memória no servidor (precisa de uma instância Node única). Node 22.12+.
+Next.js 16.4.5 (App Router, Turbopack), React 19, TypeScript, zod 4, vitest 4, Playwright, CSS puro em `src/app/globals.css`. Sem banco de dados: a sessão (tokens) vai criptografada no cookie e os caches ficam em memória por instância, então roda na Vercel/serverless. Node 22.12+.
 
 ```
 npm run dev          # servidor de desenvolvimento (DEMO_MODE=true no .env.local)
@@ -69,7 +69,7 @@ src/lib/
   bitrix/
     client.ts   REST: limitador por portal, retry, batch, listAllBatched
     service.ts  getCatalog, getDashboard, getJourney, getBenchmark, publishAutopsy
-    session.ts  sessões em memória (cookie HttpOnly), reaproveitamento por usuário
+    session.ts  cookie HttpOnly com a sessão criptografada (AES-256-GCM, `SESSION_SECRET` ou derivada de `BITRIX_CLIENT_SECRET`); Map em memória só como cache por instância; `getSession` recria a sessão a partir do cookie numa instância nova; renovar token regrava o cookie
     auth.ts     verifyApp, identifyUser (método `profile`)
     config.ts   env, DEMO_MODE, domínios permitidos
 tests/          *.test.ts (vitest; performance.test.ts e pagination.test.ts usam o simulador), fake-bitrix.ts (simulador do REST), e2e/app.spec.ts (Playwright)
@@ -77,12 +77,16 @@ tests/          *.test.ts (vitest; performance.test.ts e pagination.test.ts usam
 
 ## Regras que não se quebram
 
-- **Segurança:** tokens OAuth ficam só no servidor; o navegador recebe um cookie de sessão aleatório. Respostas da API são `no-store`. Mutações exigem origem igual a `APP_URL` e JSON (`assertSameOrigin`). Chamadas REST usam o OAuth do **usuário** que abriu o app, nunca credencial global. Históricos de negócios que o usuário não pode ler não podem chegar ao navegador.
+- **Segurança:** tokens OAuth nunca chegam ao JavaScript do navegador: vão só no cookie HttpOnly criptografado (nunca em texto puro, URL ou resposta). Respostas da API são `no-store`. Mutações exigem origem igual a `APP_URL` e JSON (`assertSameOrigin`). Chamadas REST usam o OAuth do **usuário** que abriu o app, nunca credencial global. Históricos de negócios que o usuário não pode ler não podem chegar ao navegador.
 - **Única escrita no CRM:** `crm.timeline.comment.add` da autópsia (texto montado no servidor, só negócio ganho/perdido). Não adicione outras escritas sem pedido explícito.
 - **Modo demo (`DEMO_MODE=true`)** usa dados de `src/lib/demo.ts` (negócio 8061 e fechados 9001–9006). Nunca misture dados demo com resposta ou erro de portal real.
 - **Totais parciais nunca aparecem como completos:** acima do orçamento de negócios detalhados (padrão 1.470), de 10.000 ativos ou de 10.000 movimentações do período, a API avisa (`partial` + `warning` dizendo quantos ficaram de fora) em vez de truncar em silêncio.
 - **Datas** em `America/Sao_Paulo`. Durações são corridas (sem expediente). Limite de parado é inclusivo (`>=`).
 - Mantenha o resultado dos cálculos idêntico quando otimizar: há testes de equivalência em `tests/performance.test.ts`.
+
+## Sessão na Vercel (nov/2026)
+
+Na Vercel cada requisição pode cair numa instância diferente; com a sessão só em memória isso dava 401 "Abra a aplicação pelo Bitrix24..." de tempos em tempos (com o ngrok era um processo só). Por isso a sessão vai criptografada no cookie. Não volte a depender só do `Map` de `session.ts`: tudo que for cache nele precisa poder ser refeito do zero. Testes em `tests/session.test.ts`.
 
 ## Desempenho (já feito; preserve)
 

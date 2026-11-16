@@ -6,7 +6,8 @@ import {
   cookieOptions,
   openSession,
   SESSION_COOKIE,
-  sessionIdFromCookieHeader,
+  sessionCookieFromHeader,
+  sessionCookieValue,
   type Session,
 } from "@/lib/bitrix/session";
 import { getCatalog } from "@/lib/bitrix/service";
@@ -117,7 +118,7 @@ export async function POST(request: Request) {
     ]);
     const { session } = openSession(
       { ...data, userId },
-      sessionIdFromCookieHeader(request.headers.get("cookie")),
+      sessionCookieFromHeader(request.headers.get("cookie")),
     );
     // Adianta o catálogo (pipelines e etapas) enquanto o navegador segue o
     // redirect e carrega a página; a próxima consulta reaproveita a promessa.
@@ -130,7 +131,11 @@ export async function POST(request: Request) {
       destination.searchParams.set("PROTOCOL", "1");
     }
     const response = NextResponse.redirect(destination, 303);
-    response.cookies.set(SESSION_COOKIE, session.id, cookieOptions());
+    response.cookies.set(
+      SESSION_COOKIE,
+      sessionCookieValue(session),
+      cookieOptions(),
+    );
     response.headers.set("Cache-Control", "no-store");
     return response;
   } catch (error) {
