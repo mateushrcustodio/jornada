@@ -598,6 +598,13 @@ input[type="number"] {
   display: grid;
   gap: 18px;
 }
+/* Trocar a ordem (Decrescente / Crescente / Funil) reordena estas linhas. Sem
+   isto o navegador segue a linha "âncora" que mudou de lugar e rola a página
+   inteira, tirando o usuário de onde ele estava. */
+.retention-bars,
+.table-scroll {
+  overflow-anchor: none;
+}
 .retention-label {
   display: flex;
   align-items: baseline;

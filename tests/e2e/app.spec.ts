@@ -987,3 +987,39 @@ test("Etapas: setas de Tempo médio e Maior tempo ordenam o Detalhamento por eta
   await expect(maximum).toHaveAttribute("aria-sort", "none");
   await expect(average).toHaveAttribute("aria-sort", "none");
 });
+
+test("Etapas: trocar a ordem não rola a página", async ({
+  page,
+}, testInfo) => {
+  // Na emulação mobile o Playwright rola sozinho para acertar o clique.
+  test.skip(testInfo.project.name !== "desktop", "clique com mouse");
+  await page.goto("/dashboard/stages");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  const panel = page.locator("section.panel").filter({
+    has: page.getByRole("heading", { name: "Detalhamento por etapa" }),
+  });
+  await expect(panel.locator("tbody tr").first()).toBeVisible();
+  const toggle = panel.getByRole("button", { name: "Crescente", exact: true });
+  // Posiciona o seletor no meio da janela, sem rolagem suave.
+  await toggle.evaluate((el) => {
+    document.documentElement.style.scrollBehavior = "auto";
+    el.scrollIntoView({ block: "center" });
+  });
+  const scrollY = () => page.evaluate(() => Math.round(window.scrollY));
+  const before = await scrollY();
+  expect(before).toBeGreaterThan(0);
+  // Uma reordenação completa (Crescente) e depois a ordenação pelas colunas.
+  await toggle.click();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await page.waitForTimeout(500);
+  expect(await scrollY()).toBe(before);
+  await panel.getByRole("button", { name: "Funil", exact: true }).click();
+  await page.waitForTimeout(500);
+  expect(await scrollY()).toBe(before);
+  await panel
+    .locator("th", { hasText: "Maior tempo" })
+    .locator(".sort-button")
+    .click();
+  await page.waitForTimeout(500);
+  expect(await scrollY()).toBe(before);
+});
