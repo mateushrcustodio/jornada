@@ -287,6 +287,37 @@ test("card aberto dentro do Bitrix24 não mostra o botão de voltar", async ({
     page.getByRole("link", { name: "Voltar ao painel" }),
   ).toHaveCount(0);
 });
+test("card aberto dentro do Bitrix24 tem a logo da Jornada que leva ao painel completo", async ({
+  page,
+}) => {
+  await page.goto("/deal/8061/journey");
+  const logo = page.getByRole("link", {
+    name: "Abrir o painel completo da Jornada",
+  });
+  await expect(logo).toBeVisible();
+  await expect(logo).toHaveText("Jornada");
+  // Fica no cabeçalho, ao lado do botão de atualizar.
+  await expect(
+    page.locator(".journey-heading .heading-actions").getByRole("button", {
+      name: "Atualizar jornada",
+    }),
+  ).toBeVisible();
+  // Abre o painel no mesmo quadro (a sessão só existe dentro dele).
+  await logo.click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole("link", { name: "Visão geral" })).toBeVisible();
+});
+test("card aberto pelo painel não repete a logo ao lado de Voltar ao painel", async ({
+  page,
+}) => {
+  await page.goto("/deal/8061/journey?source=dashboard");
+  await expect(
+    page.getByRole("link", { name: "Voltar ao painel" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Abrir o painel completo da Jornada" }),
+  ).toHaveCount(0);
+});
 test("Movimentações e Parados buscam só a página aberta", async ({ page }) => {
   const full: string[] = [];
   const pages: { kind: string; page: number }[] = [];

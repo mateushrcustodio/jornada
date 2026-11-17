@@ -5,6 +5,7 @@ import { useSearchParams } from "next/navigation";
 import type { JourneyData, Stage, Visit } from "@/lib/types";
 import { dateTime, duration } from "@/lib/format";
 import { isClosed, resolveStage } from "@/lib/calculations";
+import { BrandMark } from "./brand";
 import { useResource } from "./use-resource";
 import { Autopsy } from "./autopsy";
 import { Empty, ErrorState, Panel, Skeleton, StageBadge } from "./ui";
@@ -117,6 +118,21 @@ export function CompactJourney({
           </div>
         </div>
         <div className="heading-actions">
+          {/* Dentro do card do Bitrix24 não há menu: a logo leva ao painel
+              completo. Abre no mesmo quadro, porque a sessão (cookie
+              particionado) só existe dentro dele. Vindo do painel já há o
+              "Voltar ao painel". */}
+          {!fromDashboard && (
+            <Link
+              href="/dashboard"
+              className="journey-brand"
+              aria-label="Abrir o painel completo da Jornada"
+              title="Abrir o painel completo da Jornada"
+            >
+              <BrandMark className="brand-mark" />
+              Jornada
+            </Link>
+          )}
           {fromDashboard && data.url && (
             <a
               href={data.url}

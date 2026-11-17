@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { BrandMark } from "./brand";
 import { useApp } from "./provider";
 
 const navigation = [
@@ -97,24 +98,7 @@ export function Shell({ children }: { children: ReactNode }) {
       </a>
       <header className="topnav">
         <Link href="/dashboard" className="brand">
-          <svg
-            className="brand-mark"
-            viewBox="0 0 64 64"
-            aria-hidden="true"
-            focusable="false"
-          >
-            <rect width="64" height="64" rx="16" fill="currentColor" />
-            <path
-              d="M42 17V35a12 12 0 0 1-12 12H21"
-              fill="none"
-              stroke="#fff"
-              strokeWidth="5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-            <circle cx="42" cy="16" r="6" fill="#fff" />
-            <circle cx="21" cy="47" r="6" fill="#fff" />
-          </svg>
+          <BrandMark className="brand-mark" />
           Jornada
         </Link>
         <NavPills path={path} />
