@@ -306,6 +306,38 @@ test("card aberto dentro do Bitrix24 tem a logo da Jornada que leva ao painel co
   await logo.click();
   await expect(page).toHaveURL(/\/dashboard$/);
   await expect(page.getByRole("link", { name: "Visão geral" })).toBeVisible();
+  // Por ali, o painel tem o botão de voltar ao card de origem, que continua
+  // ao trocar de aba do painel.
+  const back = page.getByRole("link", { name: "Voltar ao card" });
+  await expect(back).toBeVisible();
+  await page.getByRole("link", { name: "Movimentações" }).click();
+  await expect(page).toHaveURL(/\/dashboard\/movements$/);
+  await expect(back).toBeVisible();
+  await back.click();
+  await expect(page).toHaveURL(/\/deal\/8061\/journey$/);
+  await expect(
+    page.getByRole("heading", { name: "Acme · Expansão comercial" }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "Abrir o painel completo da Jornada" }),
+  ).toBeVisible();
+});
+test("painel aberto pelo menu (sem passar pela logo do card) não tem Voltar ao card", async ({
+  page,
+}) => {
+  await page.goto("/dashboard");
+  await expect(page.getByRole("link", { name: "Visão geral" })).toBeVisible();
+  await expect(page.getByRole("link", { name: "Voltar ao card" })).toHaveCount(
+    0,
+  );
+  // Abrir um negócio pelo painel e voltar também não cria o botão.
+  await page.goto("/dashboard/stalled");
+  await page.locator('a[href*="/journey?source=dashboard"]').first().click();
+  await page.getByRole("link", { name: "Voltar ao painel" }).click();
+  await expect(page).toHaveURL(/\/dashboard$/);
+  await expect(page.getByRole("link", { name: "Voltar ao card" })).toHaveCount(
+    0,
+  );
 });
 test("card aberto pelo painel não repete a logo ao lado de Voltar ao painel", async ({
   page,

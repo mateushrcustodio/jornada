@@ -6,6 +6,7 @@ import type { JourneyData, Stage, Visit } from "@/lib/types";
 import { dateTime, duration } from "@/lib/format";
 import { isClosed, resolveStage } from "@/lib/calculations";
 import { BrandMark } from "./brand";
+import { rememberReturnCard } from "./return-card";
 import { useResource } from "./use-resource";
 import { Autopsy } from "./autopsy";
 import { Empty, ErrorState, Panel, Skeleton, StageBadge } from "./ui";
@@ -126,6 +127,7 @@ export function CompactJourney({
             <Link
               href="/dashboard"
               className="journey-brand"
+              onClick={() => rememberReturnCard(id)}
               aria-label="Abrir o painel completo da Jornada"
               title="Abrir o painel completo da Jornada"
             >

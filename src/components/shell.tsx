@@ -1,5 +1,5 @@
 "use client";
-import { Settings2 } from "lucide-react";
+import { ArrowLeft, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -11,6 +11,7 @@ import {
 } from "react";
 import { BrandMark } from "./brand";
 import { useApp } from "./provider";
+import { useReturnCard } from "./return-card";
 
 const navigation = [
   { href: "/dashboard", label: "Visão geral" },
@@ -79,6 +80,7 @@ function NavPills({ path }: { path: string }) {
 export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const { demo } = useApp();
+  const returnCard = useReturnCard();
   // Dentro do card do Bitrix24 só o conteúdo da aba aparece, sem navegação.
   if (path.startsWith("/deal/"))
     return (
@@ -115,6 +117,13 @@ export function Shell({ children }: { children: ReactNode }) {
         </div>
       </header>
       <main id="main-content" className="main-content" tabIndex={-1}>
+        {/* Só quando o painel foi aberto pela logo da aba do card. */}
+        {returnCard !== undefined && (
+          <Link href={`/deal/${returnCard}/journey`} className="back-link">
+            <ArrowLeft size={16} />
+            Voltar ao card
+          </Link>
+        )}
         {children}
       </main>
     </div>
