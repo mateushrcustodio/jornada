@@ -44,3 +44,7 @@ export const sortSchema = z.object({
   by: z.enum(["opportunity", "when"]),
   dir: z.enum(["asc", "desc"]),
 });
+export const stalledSortSchema = z.object({
+  by: z.enum(["opportunity", "duration"]),
+  dir: z.enum(["asc", "desc"]),
+});

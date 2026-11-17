@@ -49,7 +49,7 @@ export function StageOrderToggle({
   order,
   onChange,
 }: {
-  order: StageOrder;
+  order: StageOrder | undefined;
   onChange: (order: StageOrder) => void;
 }) {
   return (

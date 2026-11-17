@@ -8,6 +8,7 @@ import {
   type Filters,
   type MovementSort,
   type Settings,
+  type StalledSort,
 } from "@/lib/types";
 
 const { current } = vi.hoisted(() => ({
@@ -18,6 +19,7 @@ vi.mock("@/lib/bitrix/session", async (importOriginal) => ({
   getSession: async () => current.session,
 }));
 const service = await import("@/lib/bitrix/service");
+const { sortStalled } = await import("@/lib/calculations");
 const { sessions } = await import("@/lib/bitrix/session");
 
 const DOMAIN = "example.bitrix24.com.br";
@@ -643,6 +645,123 @@ describe("Parados sob demanda", () => {
       full.stalled.slice(0, PAGE_SIZE).map((r) => r.deal.id),
     );
   });
+  // Lê todas as páginas de Parados na ordem pedida.
+  const allStalled = async (settings: Settings, sort?: StalledSort) => {
+    const first = await service.getStalledPage(filters, settings, 1, sort);
+    const rows = [...first.rows];
+    for (let page = 2; page <= Math.ceil(first.total / PAGE_SIZE); page += 1)
+      rows.push(
+        ...(await service.getStalledPage(filters, settings, page, sort)).rows,
+      );
+    return { first, rows };
+  };
+  const stalledSettings = { ...DEFAULT_SETTINGS, stalledHours: 1 };
+  it("ordena todas as páginas pelo faturamento, do maior para o menor e o contrário", async () => {
+    const fake = open();
+    vi.stubGlobal("fetch", fake.fetch);
+    const full = await service.getDashboard(filters, stalledSettings);
+    await service.getCatalog(current.session!);
+    fake.stats.hits = 0;
+    fake.stats.byMethod = {};
+    const desc = await allStalled(stalledSettings, {
+      by: "opportunity",
+      dir: "desc",
+    });
+    expect(desc.first.total).toBe(full.stalled.length);
+    expect(desc.rows).toHaveLength(full.stalled.length);
+    const values = desc.rows.map((r) => r.deal.opportunity ?? 0);
+    expect(values).toEqual([...values].sort((a, b) => b - a));
+    // Mesmo conjunto de negócios, só em outra ordem.
+    expect(desc.rows.map((r) => r.deal.id).sort((a, b) => a - b)).toEqual(
+      full.stalled.map((r) => r.deal.id).sort((a, b) => a - b),
+    );
+    // Faturamentos iguais ficam do mais parado para o menos parado.
+    for (let i = 1; i < desc.rows.length; i += 1)
+      if (values[i] === values[i - 1])
+        expect(desc.rows[i - 1].duration).toBeGreaterThanOrEqual(
+          desc.rows[i].duration,
+        );
+    const asc = await allStalled(stalledSettings, {
+      by: "opportunity",
+      dir: "asc",
+    });
+    const ascValues = asc.rows.map((r) => r.deal.opportunity ?? 0);
+    expect(ascValues).toEqual([...ascValues].sort((a, b) => a - b));
+    expect(ascValues[0]).toBeLessThan(ascValues.at(-1)!);
+    // Ordenar é do Bitrix24: nenhuma leitura de histórico, como na ordem padrão.
+    expect(fake.stats.byMethod["crm.stagehistory.list"]).toBeUndefined();
+  });
+  it("tempo parado: decrescente é a ordem padrão e crescente é o inverso exato", async () => {
+    const fake = open();
+    vi.stubGlobal("fetch", fake.fetch);
+    const standard = await allStalled(stalledSettings);
+    const desc = await allStalled(stalledSettings, {
+      by: "duration",
+      dir: "desc",
+    });
+    const asc = await allStalled(stalledSettings, {
+      by: "duration",
+      dir: "asc",
+    });
+    expect(standard.rows.length).toBeGreaterThan(PAGE_SIZE);
+    expect(desc.rows.map((r) => r.deal.id)).toEqual(
+      standard.rows.map((r) => r.deal.id),
+    );
+    expect(asc.first.total).toBe(standard.first.total);
+    expect(asc.rows.map((r) => r.deal.id)).toEqual(
+      standard.rows.map((r) => r.deal.id).reverse(),
+    );
+    const durations = asc.rows.map((r) => r.duration);
+    expect(durations).toEqual([...durations].sort((a, b) => a - b));
+    expect(durations[0]).toBeLessThan(durations.at(-1)!);
+  });
+  it("a ordenação respeita os filtros de pipeline, responsável e faturamento", async () => {
+    const fake = open();
+    vi.stubGlobal("fetch", fake.fetch);
+    const scoped = { ...filters, assignedById: 2, opportunityMin: 10000 };
+    const page = await service.getStalledPage(scoped, stalledSettings, 1, {
+      by: "opportunity",
+      dir: "asc",
+    });
+    expect(page.rows.length).toBeGreaterThan(0);
+    expect(page.rows.every((r) => r.deal.assignedById === 2)).toBe(true);
+    const values = page.rows.map((r) => r.deal.opportunity ?? 0);
+    expect(values.every((v) => v >= 10000)).toBe(true);
+    expect(values).toEqual([...values].sort((a, b) => a - b));
+  });
+  it("sem aceitar o filtro por movedTime, o caminho completo também ordena", async () => {
+    const fake = open();
+    const rejecting = async (
+      input: string | URL | Request,
+      init?: RequestInit,
+    ) => {
+      const body = JSON.parse(String(init?.body ?? "{}"));
+      if (body.filter && "<=movedTime" in body.filter)
+        return new Response(
+          JSON.stringify({ error: "BAD_FILTER", error_description: "" }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        );
+      return fake.fetch(input, init);
+    };
+    vi.stubGlobal("fetch", rejecting);
+    const full = await service.getDashboard(filters, stalledSettings);
+    for (const sort of [
+      { by: "opportunity", dir: "desc" },
+      { by: "duration", dir: "asc" },
+    ] as StalledSort[]) {
+      const expected = sortStalled(full.stalled, sort).slice(0, PAGE_SIZE);
+      const page = await service.getStalledPage(
+        filters,
+        stalledSettings,
+        1,
+        sort,
+      );
+      expect(page.total).toBe(full.stalled.length);
+      expect(page.rows.map((r) => r.deal.id)).toEqual(
+        expected.map((r) => r.deal.id),
+      );
+    }
+  });
 });
 
 describe("modo demonstração", () => {
@@ -695,5 +814,24 @@ describe("modo demonstração com responsável, faturamento e ordenação", () =
     expect(ranged.rows.every((r) => (r.deal.opportunity ?? 0) >= 100000)).toBe(
       true,
     );
+  });
+  it("ordena Parados pelo faturamento e pelo tempo parado", async () => {
+    vi.stubEnv("DEMO_MODE", "true");
+    const settings = { ...DEFAULT_SETTINGS, stalledHours: 1 };
+    const standard = await service.getStalledPage(filters, settings, 1);
+    expect(standard.rows.length).toBeGreaterThan(1);
+    const revenue = await service.getStalledPage(filters, settings, 1, {
+      by: "opportunity",
+      dir: "desc",
+    });
+    const values = revenue.rows.map((r) => r.deal.opportunity ?? 0);
+    expect(values).toEqual([...values].sort((a, b) => b - a));
+    expect(revenue.total).toBe(standard.total);
+    const shortest = await service.getStalledPage(filters, settings, 1, {
+      by: "duration",
+      dir: "asc",
+    });
+    const times = shortest.rows.map((r) => r.duration);
+    expect(times).toEqual([...times].sort((a, b) => a - b));
   });
 });

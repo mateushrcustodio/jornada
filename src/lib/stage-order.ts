@@ -1,4 +1,4 @@
-import type { Pipeline, Retention } from "./types";
+import type { Pipeline, Retention, SortDirection } from "./types";
 
 // Ordem da lista "Tempo médio por etapa" (aba Etapas):
 // - desc: do maior para o menor tempo médio (padrão);
@@ -35,5 +35,21 @@ export function sortRetention(
     // nas duas direções (em "Crescente" não podem abrir a lista com zero).
     if (a.visits > 0 !== b.visits > 0) return a.visits > 0 ? -1 : 1;
     return sign * (a.average - b.average) || funnel(a, b);
+  });
+}
+
+// Ordenação pela coluna "Maior tempo" da tabela "Detalhamento por etapa". Vale
+// as mesmas regras de `sortRetention`: etapa sem passagem no período não tem
+// tempo para comparar e vai ao fim nas duas direções; empate segue o funil.
+export function sortRetentionByMaximum(
+  rows: Retention[],
+  dir: SortDirection,
+  pipelines: Pipeline[],
+): Retention[] {
+  const funnel = byFunnel(pipelines);
+  const sign = dir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    if (a.visits > 0 !== b.visits > 0) return a.visits > 0 ? -1 : 1;
+    return sign * (a.maximum - b.maximum) || funnel(a, b);
   });
 }

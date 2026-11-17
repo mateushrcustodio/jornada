@@ -652,7 +652,12 @@ test("Parados: mesmas colunas de Movimentações, sem Quando, com os dados de ca
   await page.getByLabel("Período", { exact: true }).selectOption("30d");
   await expect(page.locator("thead th")).toHaveText(STALLED_COLUMNS);
   await expect(page.locator("thead th", { hasText: "Quando" })).toHaveCount(0);
-  await expect(page.locator("thead .sort-button")).toHaveCount(0);
+  // Só Tempo parado e Faturamento têm seta de ordenação.
+  await expect(page.locator("thead .sort-button")).toHaveCount(2);
+  for (const name of ["Tempo parado", "Faturamento"])
+    await expect(
+      page.locator("th", { hasText: name }).locator(".sort-button"),
+    ).toHaveCount(1);
   const rows = page.locator("tbody tr");
   await expect(rows.first()).toBeVisible();
   for (const name of ["Pipeline", "Movido por", "Pessoa responsável"])
@@ -663,6 +668,88 @@ test("Parados: mesmas colunas de Movimentações, sem Quando, com os dados de ca
   expect(
     (await column(page, "Tempo parado")).every((v) => /\d/.test(v)),
   ).toBe(true);
+});
+
+// Negócios (título) da página aberta de Parados, na ordem da tabela.
+const dealTitles = (page: import("@playwright/test").Page) =>
+  column(page, "Negócio");
+
+test("Parados: seta do faturamento alterna maior→menor e menor→maior", async ({
+  page,
+}) => {
+  await page.goto("/dashboard/stalled");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  const header = page.locator("th", { hasText: "Faturamento" });
+  await expect(header).toHaveAttribute("aria-sort", "none");
+  await expect
+    .poll(async () => (await column(page, "Faturamento")).length)
+    .toBeGreaterThan(0);
+  const sortButton = header.locator(".sort-button");
+  const inOrder = async (direction: "desc" | "asc") => {
+    const values = (await column(page, "Faturamento")).map(reais);
+    return (
+      values.length > 1 &&
+      values.every((v, i) =>
+        !i
+          ? true
+          : direction === "desc"
+            ? values[i - 1] >= v
+            : values[i - 1] <= v,
+      )
+    );
+  };
+  await sortButton.click();
+  await expect(header).toHaveAttribute("aria-sort", "descending");
+  await expect.poll(() => inOrder("desc")).toBe(true);
+  const biggest = reais((await column(page, "Faturamento"))[0]);
+  await sortButton.click();
+  await expect(header).toHaveAttribute("aria-sort", "ascending");
+  await expect.poll(() => inOrder("asc")).toBe(true);
+  const smallest = reais((await column(page, "Faturamento"))[0]);
+  expect(smallest).toBeLessThanOrEqual(biggest);
+  // Só uma ordenação por vez, e "Limpar" volta à ordem padrão.
+  await page
+    .locator("th", { hasText: "Tempo parado" })
+    .locator(".sort-button")
+    .click();
+  await expect(header).toHaveAttribute("aria-sort", "none");
+  await page.getByRole("button", { name: "Limpar" }).click();
+  await expect(page.locator("th", { hasText: "Tempo parado" })).toHaveAttribute(
+    "aria-sort",
+    "none",
+  );
+});
+
+test("Parados: seta do tempo parado inverte a ordem padrão (maior→menor)", async ({
+  page,
+}) => {
+  await page.goto("/dashboard/stalled");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  const header = page.locator("th", { hasText: "Tempo parado" });
+  await expect(header).toHaveAttribute("aria-sort", "none");
+  await expect
+    .poll(async () => (await dealTitles(page)).length)
+    .toBeGreaterThan(0);
+  // Sem ordenação escolhida, a lista já vem do mais para o menos tempo parado.
+  const longest = (await dealTitles(page))[0];
+  const sortButton = header.locator(".sort-button");
+  await sortButton.click();
+  await expect(header).toHaveAttribute("aria-sort", "ascending");
+  await expect.poll(async () => (await dealTitles(page))[0]).not.toBe(longest);
+  // Crescente é o inverso exato da padrão: o mais parado fica na última página.
+  const pagination = page.locator(".pagination");
+  while (
+    await page.getByRole("button", { name: "Próxima página" }).isEnabled()
+  ) {
+    await page.getByRole("button", { name: "Próxima página" }).click();
+    await expect(pagination).toContainText("Página");
+  }
+  await expect.poll(async () => (await dealTitles(page)).at(-1)).toBe(longest);
+  // Segundo clique volta ao mais parado primeiro, na primeira página.
+  await sortButton.click();
+  await expect(header).toHaveAttribute("aria-sort", "descending");
+  await expect(pagination).toContainText("Página 1");
+  await expect.poll(async () => (await dealTitles(page))[0]).toBe(longest);
 });
 
 test("Parados: colunas se reorganizam pelo teclado e a ordem fica salva", async ({
@@ -818,4 +905,85 @@ test("etapas alternam o gráfico entre colunas e pizza", async ({
   await expect(dialog.locator(".range-row").first()).toBeVisible();
   await page.keyboard.press("Escape");
   await expect(panel.locator(".stage-column").first()).toBeVisible();
+});
+
+const STAGE_TABLE_COLUMNS = [
+  "Etapa / pipeline",
+  "Tempo médio",
+  "Maior tempo",
+  "Negócios na amostra",
+  "Atuais",
+  "Acima do limite",
+];
+
+test("Etapas: Detalhamento por etapa tem colunas arrastáveis e a ordem fica salva", async ({
+  page,
+}) => {
+  await page.goto("/dashboard/stages");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  const panel = page
+    .locator("section.panel")
+    .filter({
+      has: page.getByRole("heading", { name: "Detalhamento por etapa" }),
+    });
+  await expect(panel.locator("thead th")).toHaveText(STAGE_TABLE_COLUMNS);
+  await panel.getByRole("button", { name: "Mover coluna Maior tempo" }).focus();
+  await page.keyboard.press("ArrowLeft");
+  const moved = [
+    "Etapa / pipeline",
+    "Maior tempo",
+    "Tempo médio",
+    "Negócios na amostra",
+    "Atuais",
+    "Acima do limite",
+  ];
+  await expect(panel.locator("thead th")).toHaveText(moved);
+  await page.reload();
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await expect(panel.locator("thead th")).toHaveText(moved);
+  await panel.getByRole("button", { name: "Restaurar colunas" }).click();
+  await expect(panel.locator("thead th")).toHaveText(STAGE_TABLE_COLUMNS);
+  await expect(
+    panel.getByRole("button", { name: "Restaurar colunas" }),
+  ).toHaveCount(0);
+});
+
+test("Etapas: setas de Tempo médio e Maior tempo ordenam o Detalhamento por etapa", async ({
+  page,
+}) => {
+  await page.goto("/dashboard/stages");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  const panel = page
+    .locator("section.panel")
+    .filter({
+      has: page.getByRole("heading", { name: "Detalhamento por etapa" }),
+    });
+  const average = panel.locator("th", { hasText: "Tempo médio" });
+  const maximum = panel.locator("th", { hasText: "Maior tempo" });
+  await expect(panel.locator("tbody tr").first()).toBeVisible();
+  // Padrão: Decrescente pelo tempo médio, igual ao seletor ao lado.
+  await expect(average).toHaveAttribute("aria-sort", "descending");
+  await expect(maximum).toHaveAttribute("aria-sort", "none");
+  // Tempo médio alterna Decrescente / Crescente e acompanha o seletor.
+  await average.locator(".sort-button").click();
+  await expect(average).toHaveAttribute("aria-sort", "ascending");
+  await expect(
+    panel.getByRole("button", { name: "Crescente", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+  // Maior tempo: primeiro clique do maior para o menor, depois alterna.
+  await maximum.locator(".sort-button").click();
+  await expect(maximum).toHaveAttribute("aria-sort", "descending");
+  await expect(average).toHaveAttribute("aria-sort", "none");
+  const first = (await panel.locator("tbody tr").first().textContent()) ?? "";
+  await maximum.locator(".sort-button").click();
+  await expect(maximum).toHaveAttribute("aria-sort", "ascending");
+  await expect
+    .poll(
+      async () => (await panel.locator("tbody tr").first().textContent()) ?? "",
+    )
+    .not.toBe(first);
+  // Escolher uma opção do seletor solta a ordenação por Maior tempo.
+  await panel.getByRole("button", { name: "Funil", exact: true }).click();
+  await expect(maximum).toHaveAttribute("aria-sort", "none");
+  await expect(average).toHaveAttribute("aria-sort", "none");
 });

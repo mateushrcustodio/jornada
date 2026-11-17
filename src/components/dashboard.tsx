@@ -33,11 +33,12 @@ import type {
   Retention,
   SortDirection,
   StalledDeal,
+  StalledSort,
   UserOption,
   View,
 } from "@/lib/types";
 import { PAGE_SIZE } from "@/lib/types";
-import { sortRetention } from "@/lib/stage-order";
+import { sortRetention, sortRetentionByMaximum } from "@/lib/stage-order";
 import {
   dateTime,
   duration,
@@ -115,6 +116,12 @@ export function Dashboard({ view }: { view: View }) {
     "sort",
     () => undefined,
   );
+  // Ordenação de Parados (faturamento ou tempo parado): sem clique, vale a ordem
+  // padrão, do mais para o menos tempo parado.
+  const [stalledSort, setStalledSort] = useSticky<StalledSort | undefined>(
+    "stalledSort",
+    () => undefined,
+  );
   const [from, setFrom] = useSticky("from", () => "");
   const [to, setTo] = useSticky("to", () => "");
   const usersResource = useResource<UserOption[]>(
@@ -172,13 +179,35 @@ export function Dashboard({ view }: { view: View }) {
     view === "movements" && sort && !(sort.by === "when" && sort.dir === "desc")
       ? sort
       : undefined;
+  // "Tempo parado" já aparece do maior para o menor; não precisa ir ao servidor.
+  const stalledSortBody: StalledSort | undefined =
+    view === "stalled" &&
+    stalledSort &&
+    !(stalledSort.by === "duration" && stalledSort.dir === "desc")
+      ? stalledSort
+      : undefined;
   function toggleSort(by: SortKey) {
-    // Faturamento começa do maior para o menor; "Quando" já aparece da mais
-    // recente para a mais antiga, então o primeiro clique inverte. Depois disso
-    // cada clique alterna o sentido.
+    // Faturamento começa do maior para o menor; "Quando" e "Tempo parado" já
+    // aparecem do mais recente / maior para o menor, então o primeiro clique
+    // inverte. Depois disso cada clique alterna o sentido.
     const current: SortDirection | "" =
-      sort?.by === by ? sort.dir : by === "when" ? "desc" : "";
-    setSort({ by, dir: current === "desc" ? "asc" : "desc" });
+      sort?.by === by ? sort.dir : DEFAULT_DESC.has(by) ? "desc" : "";
+    setSort({
+      by: by as MovementSort["by"],
+      dir: current === "desc" ? "asc" : "desc",
+    });
+  }
+  function toggleStalledSort(by: SortKey) {
+    const current: SortDirection | "" =
+      stalledSort?.by === by
+        ? stalledSort.dir
+        : DEFAULT_DESC.has(by)
+          ? "desc"
+          : "";
+    setStalledSort({
+      by: by as StalledSort["by"],
+      dir: current === "desc" ? "asc" : "desc",
+    });
   }
   const resource = useResource<DashboardData>(
     "/api/dashboard",
@@ -189,7 +218,7 @@ export function Dashboard({ view }: { view: View }) {
   const data = resource.data;
   // A página volta para a primeira ao mudar de aba, filtro, configuração ou
   // ao atualizar; a assinatura evita um efeito só para zerar o contador.
-  const pageSignature = `${view}\n${body}\n${clock}\n${sort?.by}:${sort?.dir}`;
+  const pageSignature = `${view}\n${body}\n${clock}\n${sort?.by}:${sort?.dir}\n${stalledSort?.by}:${stalledSort?.dir}`;
   const [pageState, setPageState] = useState({ signature: "", page: 1 });
   const page = pageState.signature === pageSignature ? pageState.page : 1;
   const pageResource = useResource<PageData<Movement> | PageData<StalledDeal>>(
@@ -200,7 +229,8 @@ export function Dashboard({ view }: { view: View }) {
       kind: view,
       page,
       asOf: clock,
-      sort: sortBody,
+      sort: view === "movements" ? sortBody : undefined,
+      stalledSort: stalledSortBody,
     }),
     canQuery && paged,
     DASHBOARD_CACHE_MS,
@@ -225,7 +255,7 @@ export function Dashboard({ view }: { view: View }) {
     !!assigned ||
     !!oppMin ||
     !!oppMax ||
-    !!sort ||
+    (view === "movements" ? !!sort : view === "stalled" && !!stalledSort) ||
     effectivePeriod !== settings.defaultPeriod;
   return (
     <>
@@ -375,6 +405,7 @@ export function Dashboard({ view }: { view: View }) {
               setOppMin("");
               setOppMax("");
               setSort(undefined);
+              setStalledSort(undefined);
               setPeriod(settings.defaultPeriod);
               setFrom("");
               setTo("");
@@ -501,6 +532,7 @@ export function Dashboard({ view }: { view: View }) {
                   pipelines={catalog?.pipelines ?? []}
                   hours={settings.stalledHours}
                   paging={paging(pageResource.data)}
+                  sorting={{ active: stalledSort, onToggle: toggleStalledSort }}
                 />
               </>
             )}
@@ -894,11 +926,19 @@ const STALLED_LABELS: Record<StalledColumn, string> = {
 };
 const STALLED_ORDER_KEY = "jornada-crm.stalled-columns.v1";
 
-type SortKey = MovementSort["by"];
+// Colunas que têm seta de ordenação: Movimentações (faturamento, quando),
+// Parados (faturamento, tempo parado) e Detalhamento por etapa (tempo médio,
+// maior tempo).
+type SortKey = MovementSort["by"] | StalledSort["by"] | "average" | "maximum";
 interface Sorting {
-  active?: MovementSort;
+  active?: { by: SortKey; dir: SortDirection };
   onToggle: (by: SortKey) => void;
 }
+// Ordens que já são o padrão da lista: o primeiro clique inverte para crescente.
+const DEFAULT_DESC: ReadonlySet<SortKey> = new Set<SortKey>([
+  "when",
+  "duration",
+]);
 // Textos das setas de ordenação. `first` é o sentido do primeiro clique.
 const SORT_TEXT: Record<
   SortKey,
@@ -914,11 +954,57 @@ const SORT_TEXT: Record<
     asc: "da mais antiga para a mais recente",
     first: "asc",
   },
+  duration: {
+    desc: "do maior para o menor tempo parado",
+    asc: "do menor para o maior tempo parado",
+    first: "asc",
+  },
+  average: {
+    desc: "do maior para o menor tempo médio",
+    asc: "do menor para o maior tempo médio",
+    first: "desc",
+  },
+  maximum: {
+    desc: "do maior para o menor tempo",
+    asc: "do menor para o maior tempo",
+    first: "desc",
+  },
 };
 // Colunas de Movimentações que têm seta de ordenação.
 const MOVEMENT_SORT_KEYS: Partial<Record<MovementColumn, SortKey>> = {
   when: "when",
   revenue: "opportunity",
+};
+
+// Colunas de Parados que têm seta de ordenação.
+const STALLED_SORT_KEYS: Partial<Record<StalledColumn, SortKey>> = {
+  duration: "duration",
+  revenue: "opportunity",
+};
+
+// Colunas da tabela "Detalhamento por etapa" (aba Etapas), também arrastáveis.
+type StageColumn =
+  "stage" | "average" | "maximum" | "sample" | "current" | "stalled";
+const STAGE_COLUMNS: readonly StageColumn[] = [
+  "stage",
+  "average",
+  "maximum",
+  "sample",
+  "current",
+  "stalled",
+];
+const STAGE_LABELS: Record<StageColumn, string> = {
+  stage: "Etapa / pipeline",
+  average: "Tempo médio",
+  maximum: "Maior tempo",
+  sample: "Negócios na amostra",
+  current: "Atuais",
+  stalled: "Acima do limite",
+};
+const STAGE_ORDER_KEY = "jornada-crm.stage-columns.v1";
+const STAGE_SORT_KEYS: Partial<Record<StageColumn, SortKey>> = {
+  average: "average",
+  maximum: "maximum",
 };
 
 const assigneeLabel = (deal: Deal) =>
@@ -1209,12 +1295,14 @@ function Stalled({
   hours,
   compact = false,
   paging,
+  sorting,
 }: {
   rows: StalledDeal[];
   pipelines: Pipeline[];
   hours: number;
   compact?: boolean;
   paging?: Paging;
+  sorting?: Sorting;
 }) {
   const [requestedPage, setLocalPage] = useState(1);
   const columns = useColumnOrder(STALLED_ORDER_KEY, STALLED_COLUMNS);
@@ -1326,6 +1414,8 @@ function Stalled({
             labels={STALLED_LABELS}
             cells={cell}
             cellClass={cellClass}
+            sortKeys={STALLED_SORT_KEYS}
+            sorting={sorting}
             rows={visible}
             rowKey={(row) => row.deal.id}
             busy={paging?.busy}
@@ -1349,24 +1439,90 @@ function RetentionTable({
   rows: Retention[];
   pipelines: Pipeline[];
 }) {
-  // Mesma escolha da lista "Tempo médio por etapa": as duas seguem juntas.
+  // Mesma escolha da lista "Tempo médio por etapa": as duas seguem juntas. A
+  // seta de "Tempo médio" usa essa escolha; a de "Maior tempo" vale só aqui e,
+  // enquanto estiver ativa, manda na ordem da tabela.
   const [order, setOrder] = useStageOrder();
-  const rows = sortRetention(unsorted, order, pipelines);
+  const [maximumDir, setMaximumDir] = useState<SortDirection>();
+  const columns = useColumnOrder(STAGE_ORDER_KEY, STAGE_COLUMNS);
+  const rows = maximumDir
+    ? sortRetentionByMaximum(unsorted, maximumDir, pipelines)
+    : sortRetention(unsorted, order, pipelines);
   const [requestedPage, setPage] = useState(1);
   const size = 10,
     page = Math.min(requestedPage, Math.max(1, Math.ceil(rows.length / size)));
+  const sorting: Sorting = {
+    active: maximumDir
+      ? { by: "maximum", dir: maximumDir }
+      : order !== "funnel"
+        ? { by: "average", dir: order }
+        : undefined,
+    onToggle: (by) => {
+      setPage(1);
+      if (by === "maximum") {
+        // Primeiro clique: do maior para o menor; depois alterna.
+        setMaximumDir(maximumDir === "desc" ? "asc" : "desc");
+        return;
+      }
+      // Tempo médio: começa do maior para o menor e alterna (Decrescente /
+      // Crescente); vindo do Funil ou de "Maior tempo", também começa pelo maior.
+      const current = !maximumDir && order !== "funnel" ? order : "";
+      setMaximumDir(undefined);
+      setOrder(current === "desc" ? "asc" : "desc");
+    },
+  };
+  const customOrder =
+    columns.order.join() !== STAGE_COLUMNS.join() ? columns.reset : undefined;
+  const cell: Record<StageColumn, (row: Retention) => React.ReactNode> = {
+    stage: (row) => (
+      <>
+        <StageBadge stage={row.stage} />
+        <span className="cell-secondary">{row.pipeline}</span>
+      </>
+    ),
+    average: (row) => (
+      <strong>{row.visits ? duration(row.average) : "Sem passagens"}</strong>
+    ),
+    maximum: (row) => (row.visits ? duration(row.maximum) : "—"),
+    sample: (row) => (
+      <>
+        {row.sampleDeals}{" "}
+        <span className="muted">({row.visits} passagens)</span>
+      </>
+    ),
+    current: (row) => row.currentDeals,
+    stalled: (row) => (
+      <span className={row.stalledDeals ? "duration-critical" : "muted"}>
+        {row.stalledDeals} ·{" "}
+        {row.currentDeals
+          ? Math.round((row.stalledDeals / row.currentDeals) * 100)
+          : 0}
+        %
+      </span>
+    ),
+  };
   return (
     <Panel
       title="Detalhamento por etapa"
       action={
-        rows.length > 1 && (
-          <StageOrderToggle
-            order={order}
-            onChange={(next) => {
-              setOrder(next);
-              setPage(1);
-            }}
-          />
+        (customOrder || rows.length > 1) && (
+          <span className="panel-actions">
+            {customOrder && (
+              <button className="text-button" onClick={customOrder}>
+                Restaurar colunas
+              </button>
+            )}
+            {rows.length > 1 && (
+              <StageOrderToggle
+                order={maximumDir ? undefined : order}
+                onChange={(next) => {
+                  setMaximumDir(undefined);
+                  setOrder(next);
+                  setPage(1);
+                }}
+              />
+            )}
+          </span>
         )
       }
     >
@@ -1374,56 +1530,16 @@ function RetentionTable({
         <Empty />
       ) : (
         <>
-          <div className="table-scroll">
-            <table>
-              <thead>
-                <tr>
-                  <th>Etapa / pipeline</th>
-                  <th>Tempo médio</th>
-                  <th>Maior tempo</th>
-                  <th>Negócios na amostra</th>
-                  <th>Atuais</th>
-                  <th>Acima do limite</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.slice((page - 1) * size, page * size).map((row) => (
-                  <tr key={`${row.stage.categoryId}:${row.stage.id}`}>
-                    <td>
-                      <StageBadge stage={row.stage} />
-                      <span className="cell-secondary">{row.pipeline}</span>
-                    </td>
-                    <td>
-                      <strong>
-                        {row.visits ? duration(row.average) : "Sem passagens"}
-                      </strong>
-                    </td>
-                    <td>{row.visits ? duration(row.maximum) : "—"}</td>
-                    <td>
-                      {row.sampleDeals}{" "}
-                      <span className="muted">({row.visits} passagens)</span>
-                    </td>
-                    <td>{row.currentDeals}</td>
-                    <td>
-                      <span
-                        className={
-                          row.stalledDeals ? "duration-critical" : "muted"
-                        }
-                      >
-                        {row.stalledDeals} ·{" "}
-                        {row.currentDeals
-                          ? Math.round(
-                              (row.stalledDeals / row.currentDeals) * 100,
-                            )
-                          : 0}
-                        %
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ReorderableTable
+            columns={columns}
+            labels={STAGE_LABELS}
+            cells={cell}
+            cellClass={{}}
+            sortKeys={STAGE_SORT_KEYS}
+            sorting={sorting}
+            rows={rows.slice((page - 1) * size, page * size)}
+            rowKey={(row) => `${row.stage.categoryId}:${row.stage.id}`}
+          />
           <Pagination
             page={page}
             total={rows.length}

@@ -12,6 +12,7 @@ import {
   type RawStatus,
   type Settings,
   type StalledDeal,
+  type StalledSort,
   type UserOption,
 } from "../types";
 import {
@@ -26,6 +27,7 @@ import {
   sortByOpportunity,
   sortByWhen,
   sortMovements,
+  sortStalled,
   stageFilters,
 } from "../calculations";
 import {
@@ -1217,10 +1219,29 @@ function stalledFilter(
   return filter;
 }
 
+// Ordem pedida ao Bitrix24 para Parados. Ordenar por movedTime crescente é o
+// mesmo que ordenar pelo tempo parado, do maior para o menor (ordem padrão);
+// "asc" é o inverso exato. Por faturamento, o empate fica do mais parado para o
+// menos parado. A mesma regra de desempate está em `sortStalled`.
+function stalledOrder(sort: StalledSort | undefined): Record<string, string> {
+  if (sort?.by === "opportunity")
+    return {
+      opportunity: sort.dir === "asc" ? "ASC" : "DESC",
+      movedTime: "ASC",
+      id: "ASC",
+    };
+  const longestFirst = sort?.dir !== "asc";
+  return {
+    movedTime: longestFirst ? "ASC" : "DESC",
+    id: longestFirst ? "ASC" : "DESC",
+  };
+}
+
 export async function getStalledPage(
   filters: Filters,
   settings: Settings,
   page: number,
+  sort?: StalledSort,
 ): Promise<PageData<StalledDeal>> {
   const now = Date.now();
   if (isDemo()) {
@@ -1244,10 +1265,13 @@ export async function getStalledPage(
       )
         latest.set(entry.OWNER_ID, entry);
     }
-    const rows = full.stalled.map((row) => ({
-      ...row,
-      actor: latest.get(row.deal.id)?.MOVED_BY_NAME,
-    }));
+    const rows = sortStalled(
+      full.stalled.map((row) => ({
+        ...row,
+        actor: latest.get(row.deal.id)?.MOVED_BY_NAME,
+      })),
+      sort,
+    );
     return { ...sliceRows(rows, page), demo: true };
   }
   const session = await getSession();
@@ -1259,8 +1283,9 @@ export async function getStalledPage(
     const filter = stalledFilter(catalog, filters, settings, cutoff);
     if (!filter) return emptyPage(1, false);
     const { enabledStage } = stageFilters(filters, settings);
-    // Ordenar por movedTime crescente é o mesmo que ordenar pelo tempo parado,
-    // do maior para o menor. O Bitrix24 devolve o total junto com a página.
+    // A ordenação (tempo parado ou faturamento) é do Bitrix24, então vale para
+    // todas as páginas. O Bitrix24 devolve o total junto com a página.
+    const order = stalledOrder(sort);
     const read = (requested: number) => {
       const start =
         Math.floor(((requested - 1) * PAGE_SIZE) / REST_PAGE) * REST_PAGE;
@@ -1271,7 +1296,7 @@ export async function getStalledPage(
           entityTypeId: 2,
           filter,
           select: dealSelect,
-          order: { movedTime: "ASC", id: "ASC" },
+          order,
         },
         "items",
         start,
@@ -1319,7 +1344,7 @@ export async function getStalledPage(
     // Se o portal não aceitar o filtro por movedTime, calcula pelo caminho
     // completo (mais lento, mas igual ao painel) e entrega a página pedida.
     const full = await getDashboard(filters, settings);
-    const fallback = sliceRows(full.stalled, page);
+    const fallback = sliceRows(sortStalled(full.stalled, sort), page);
     return {
       ...fallback,
       rows: await withStalledNames(session, fallback.rows),

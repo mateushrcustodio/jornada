@@ -74,6 +74,13 @@ export interface MovementSort {
   by: "opportunity" | "when";
   dir: SortDirection;
 }
+// Ordenação opcional de Parados: pelo faturamento do negócio ou pelo tempo
+// parado ("duration": desc = parados há mais tempo primeiro, que é a ordem
+// padrão; asc = parados há menos tempo primeiro).
+export interface StalledSort {
+  by: "opportunity" | "duration";
+  dir: SortDirection;
+}
 export interface Visit {
   entry: HistoryEntry;
   stage: Stage;

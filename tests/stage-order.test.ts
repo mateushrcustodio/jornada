@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { sortRetention } from "@/lib/stage-order";
+import { sortRetention, sortRetentionByMaximum } from "@/lib/stage-order";
 import type { Pipeline, Retention } from "@/lib/types";
 
 const pipelines: Pipeline[] = [
@@ -75,6 +75,51 @@ describe("sortRetention", () => {
     const copy = [...tied];
     expect(names(sortRetention(tied, "desc", pipelines))).toEqual(["A", "B"]);
     expect(names(sortRetention(tied, "asc", pipelines))).toEqual(["A", "B"]);
+    expect(tied).toEqual(copy);
+  });
+});
+
+describe("sortRetentionByMaximum", () => {
+  const withMaximum = (
+    categoryId: number,
+    id: string,
+    sort: number,
+    maximum: number,
+    visits = maximum > 0 ? 2 : 0,
+  ): Retention => ({ ...row(categoryId, id, sort, 1, visits), maximum });
+  const peaks = [
+    withMaximum(1, "B", 20, 50),
+    withMaximum(1, "A", 10, 90),
+    withMaximum(1, "D", 40, 0),
+    withMaximum(1, "C", 30, 20),
+  ];
+  it("decrescente: maior pico primeiro, sem passagem por último", () => {
+    expect(names(sortRetentionByMaximum(peaks, "desc", pipelines))).toEqual([
+      "A",
+      "B",
+      "C",
+      "D",
+    ]);
+  });
+  it("crescente: menor pico primeiro, sem passagem continua por último", () => {
+    expect(names(sortRetentionByMaximum(peaks, "asc", pipelines))).toEqual([
+      "C",
+      "B",
+      "A",
+      "D",
+    ]);
+  });
+  it("empate segue a ordem do funil e não altera a lista original", () => {
+    const tied = [withMaximum(1, "B", 20, 7), withMaximum(1, "A", 10, 7)];
+    const copy = [...tied];
+    expect(names(sortRetentionByMaximum(tied, "desc", pipelines))).toEqual([
+      "A",
+      "B",
+    ]);
+    expect(names(sortRetentionByMaximum(tied, "asc", pipelines))).toEqual([
+      "A",
+      "B",
+    ]);
     expect(tied).toEqual(copy);
   });
 });

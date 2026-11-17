@@ -9,6 +9,8 @@ import type {
   MovementSort,
   Settings,
   Stage,
+  StalledDeal,
+  StalledSort,
   Visit,
 } from "./types";
 import { LEGACY_STAGE_NAMES } from "./legacy-stages";
@@ -167,6 +169,30 @@ export function sortByOpportunity<T>(
 // antiga (data e ID decrescentes); "asc" é exatamente a ordem inversa.
 export function sortByWhen<T>(rows: T[], sort: MovementSort | undefined): T[] {
   return sort?.by === "when" && sort.dir === "asc" ? [...rows].reverse() : rows;
+}
+// Ordena os negócios parados pelo faturamento ou pelo tempo parado, com a mesma
+// regra que o servidor pede ao Bitrix24 (crm.item.list): faturamento ausente
+// conta como 0; empate de faturamento fica do mais parado para o menos parado;
+// empate de tempo segue o ID (crescente em "desc", decrescente em "asc", que é
+// o inverso exato de movedTime + ID).
+export function sortStalled(
+  rows: StalledDeal[],
+  sort: StalledSort | undefined,
+): StalledDeal[] {
+  if (!sort) return rows;
+  const factor = sort.dir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    if (sort.by === "opportunity") {
+      return (
+        factor * ((a.deal.opportunity ?? 0) - (b.deal.opportunity ?? 0)) ||
+        b.duration - a.duration ||
+        a.deal.id - b.deal.id
+      );
+    }
+    return (
+      factor * (a.duration - b.duration) || -factor * (a.deal.id - b.deal.id)
+    );
+  });
 }
 export const sortMovements = (
   rows: Movement[],
