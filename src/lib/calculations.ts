@@ -20,10 +20,18 @@ export const stageKey = (categoryId: number, id: string) =>
   `${categoryId}:${id}`;
 export const isClosed = (deal: Deal) =>
   ["S", "F"].includes(deal.stageSemanticId || "");
-// Situação do negócio na aba Etapas. Sem `status` (Visão geral) não há recorte.
-export function matchesStageStatus(deal: Deal, status?: StageStatus) {
+// Tipo da etapa na aba Etapas (pela semântica da passagem no histórico): "open"
+// = etapas normais (P), "closed" = etapas de conclusão (S ganho / F perda) e
+// "all" = as duas. Sem `status` (Visão geral) não há recorte. O recorte é só da
+// etapa: os negócios analisados continuam sendo os mesmos, então o tempo das
+// etapas normais não muda entre as opções.
+export function matchesStageStatus(
+  semanticId: string | undefined,
+  status?: StageStatus,
+) {
   if (!status || status === "all") return true;
-  return status === "closed" ? isClosed(deal) : !isClosed(deal);
+  const closed = ["S", "F"].includes(semanticId ?? "");
+  return status === "closed" ? closed : !closed;
 }
 // Etapa final: só passagens de ganho/perda e duração máxima zero. Se o negócio
 // foi reaberto depois do ganho/perda, a etapa tem duração real e deixa de ser
@@ -230,11 +238,7 @@ export function buildDashboard(
 ): DashboardData {
   const { enabledStage } = stageFilters(filters, settings);
   const allVisits = deals
-    .filter(
-      (deal) =>
-        matchesDealFilters(deal, filters) &&
-        matchesStageStatus(deal, filters.stageStatus),
-    )
+    .filter((deal) => matchesDealFilters(deal, filters))
     .map((deal) => ({
       deal,
       visits: calculateVisits(history, deal, catalog, now),
@@ -247,7 +251,8 @@ export function buildDashboard(
           return (
             time >= Date.parse(filters.from) &&
             time <= Date.parse(filters.to) &&
-            enabledStage(v.entry.CATEGORY_ID, v.entry.STAGE_ID)
+            enabledStage(v.entry.CATEGORY_ID, v.entry.STAGE_ID) &&
+            matchesStageStatus(v.entry.STAGE_SEMANTIC_ID, filters.stageStatus)
           );
         })
         .map((v) => ({ ...v, deal, url: dealUrl(domain, deal.id) })),
@@ -261,25 +266,29 @@ export function buildDashboard(
     ({ deal }) =>
       !isClosed(deal) && enabledStage(deal.categoryId, deal.stageId),
   );
-  const current = active.flatMap(({ deal, visits }) => {
-    const visit = visits.at(-1);
-    const enteredAt = visit?.current
-      ? visit.entry.CREATED_TIME
-      : deal.movedTime;
-    if (!enteredAt || !Number.isFinite(Date.parse(enteredAt))) return [];
-    return [
-      {
-        deal,
-        enteredAt,
-        stage: resolveStage(catalog, {
-          CATEGORY_ID: deal.categoryId,
-          STAGE_ID: deal.stageId,
-        }),
-        duration: Math.max(0, now - Date.parse(enteredAt)),
-        url: dealUrl(domain, deal.id),
-      },
-    ];
-  });
+  // A posição atual dos negócios abertos é de etapa normal: fica de fora quando
+  // só as etapas de conclusão foram pedidas.
+  const current = (filters.stageStatus === "closed" ? [] : active).flatMap(
+    ({ deal, visits }) => {
+      const visit = visits.at(-1);
+      const enteredAt = visit?.current
+        ? visit.entry.CREATED_TIME
+        : deal.movedTime;
+      if (!enteredAt || !Number.isFinite(Date.parse(enteredAt))) return [];
+      return [
+        {
+          deal,
+          enteredAt,
+          stage: resolveStage(catalog, {
+            CATEGORY_ID: deal.categoryId,
+            STAGE_ID: deal.stageId,
+          }),
+          duration: Math.max(0, now - Date.parse(enteredAt)),
+          url: dealUrl(domain, deal.id),
+        },
+      ];
+    },
+  );
   const threshold = settings.stalledHours * 3600000;
   const stalled = current
     .filter((v) => v.duration >= threshold)

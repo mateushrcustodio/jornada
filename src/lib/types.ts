@@ -56,9 +56,9 @@ export interface Settings {
     average: boolean;
   };
 }
-// Situação dos negócios na aba Etapas: em andamento (aberto), finalizados
-// (ganhos e perdidos) ou os dois. Sem o campo, vale o comportamento antigo
-// (nenhum recorte por situação), que é o que a Visão geral continua usando.
+// Tipo de etapa na aba Etapas: em andamento (etapas normais), finalizados
+// (etapas de conclusão, ganho/perda) ou todas. Sem o campo, vale o comportamento
+// antigo (nenhum recorte), que é o que a Visão geral continua usando.
 export type StageStatus = "open" | "closed" | "all";
 export interface Filters {
   from: string;

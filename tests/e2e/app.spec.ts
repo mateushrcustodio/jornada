@@ -1087,27 +1087,36 @@ test("Etapas: trocar a ordem não rola a página", async ({
   expect(await scrollY()).toBe(before);
 });
 
-test("Etapas: seletor de situação começa em Em andamento, inclui finalizados e lembra a escolha", async ({
+test("Etapas: seletor de tipo de etapa começa em Em andamento, mostra as etapas de conclusão e lembra a escolha", async ({
   page,
 }) => {
   await page.goto("/dashboard/stages");
   await page.getByLabel("Período", { exact: true }).selectOption("30d");
-  const group = page.getByRole("group", { name: "Situação dos negócios" });
+  const group = page.getByRole("group", { name: "Tipo de etapa" });
   const open = group.getByRole("button", { name: "Em andamento", exact: true });
-  const closed = group.getByRole("button", { name: "Finalizados", exact: true });
+  const closed = group.getByRole("button", {
+    name: "Finalizados",
+    exact: true,
+  });
   const all = group.getByRole("button", {
     name: "Em andamento + finalizados",
     exact: true,
   });
   await expect(open).toHaveAttribute("aria-pressed", "true");
-  const list = page
-    .locator("section.panel")
-    .filter({ has: page.getByRole("heading", { name: "Tempo médio por etapa" }) });
-  // Em andamento: as etapas finais (Ganho e Perdido) não entram.
-  await expect(list.locator(".retention-row").first()).toBeVisible();
-  await expect(list.locator(".retention-row", { hasText: "Ganho" })).toHaveCount(0);
-  await expect(list.locator(".retention-row", { hasText: "Perdido" })).toHaveCount(0);
-  // Finalizados: aparecem Ganho e Perdido; a etapa final (Perdido) fica sem tempo ("—").
+  const list = page.locator("section.panel").filter({
+    has: page.getByRole("heading", { name: "Tempo médio por etapa" }),
+  });
+  const row = (name: string) =>
+    list.locator(".retention-row", { hasText: name }).first();
+  // Em andamento: só etapas normais (as de conclusão não entram).
+  await expect(row("Qualificação")).toBeVisible();
+  await expect(
+    list.locator(".retention-row", { hasText: "Perdido" }),
+  ).toHaveCount(0);
+  const openLabel = await row("Qualificação")
+    .locator(".retention-label")
+    .innerText();
+  // Finalizados: só etapas de conclusão; a etapa final (Perdido) fica sem tempo.
   const request = page.waitForRequest(
     (r) =>
       r.url().endsWith("/api/dashboard") &&
@@ -1117,21 +1126,25 @@ test("Etapas: seletor de situação começa em Em andamento, inclui finalizados 
   await closed.click();
   await request;
   await expect(closed).toHaveAttribute("aria-pressed", "true");
-  await expect(list.locator(".retention-row", { hasText: "Ganho" }).first()).toBeVisible();
-  const lost = list.locator(".retention-row", { hasText: "Perdido" }).first();
-  await expect(lost).toBeVisible();
-  await expect(lost.locator(".retention-value")).toHaveText("—");
-  // Em andamento + finalizados traz os dois grupos.
+  await expect(row("Perdido")).toBeVisible();
+  await expect(row("Perdido").locator(".retention-value")).toHaveText("—");
+  await expect(
+    list.locator(".retention-row", { hasText: "Qualificação" }),
+  ).toHaveCount(0);
+  // Em andamento + finalizados: as duas; a etapa normal não muda de valor.
   await all.click();
   await expect(all).toHaveAttribute("aria-pressed", "true");
-  await expect(list.locator(".retention-row", { hasText: "Ganho" }).first()).toBeVisible();
-  await expect(list.locator(".retention-row", { hasText: "Qualificação" }).first()).toBeVisible();
+  await expect(row("Perdido")).toBeVisible();
+  await expect(row("Qualificação")).toBeVisible();
+  expect(await row("Qualificação").locator(".retention-label").innerText()).toBe(
+    openLabel,
+  );
   // A escolha fica salva ao recarregar.
   await page.reload();
   await page.getByLabel("Período", { exact: true }).selectOption("30d");
   await expect(
     page
-      .getByRole("group", { name: "Situação dos negócios" })
+      .getByRole("group", { name: "Tipo de etapa" })
       .getByRole("button", { name: "Em andamento + finalizados", exact: true }),
   ).toHaveAttribute("aria-pressed", "true");
 });

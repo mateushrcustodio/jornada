@@ -1,9 +1,9 @@
 import type { StageStatus } from "./types";
 
-// Situação dos negócios analisados na aba Etapas:
-// - open: só negócios em andamento (padrão);
-// - closed: só finalizados (ganhos e perdidos);
-// - all: em andamento e finalizados juntos.
+// Tipo de etapa mostrado na aba Etapas:
+// - open: só etapas em andamento, as normais do funil (padrão);
+// - closed: só etapas de conclusão (ganho e perda, como "Primeira Op");
+// - all: as duas.
 export const STAGE_STATUSES: StageStatus[] = ["open", "closed", "all"];
 export const DEFAULT_STAGE_STATUS: StageStatus = "open";
 

@@ -8,7 +8,7 @@ import {
 } from "@/lib/stage-status";
 import type { StageStatus } from "@/lib/types";
 
-// ---------- Escolha da situação (lembrada neste navegador) ----------
+// ---------- Escolha do tipo de etapa (lembrada neste navegador) ----------
 const STORAGE_KEY = "jornada:stage-status";
 let memory: StageStatus | null = null;
 const listeners = new Set<() => void>();
@@ -54,7 +54,7 @@ export function StageStatusToggle({
     <div
       className="mode-toggle stage-status-toggle"
       role="group"
-      aria-label="Situação dos negócios"
+      aria-label="Tipo de etapa"
     >
       {STAGE_STATUSES.map((value) => (
         <button

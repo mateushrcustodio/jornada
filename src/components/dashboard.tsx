@@ -123,7 +123,7 @@ export function Dashboard({ view }: { view: View }) {
     "stalledSort",
     () => undefined,
   );
-  // Situação dos negócios da aba Etapas (em andamento por padrão; a escolha fica
+  // Tipo de etapa da aba Etapas (em andamento por padrão; a escolha fica
   // salva neste navegador). Só vai ao servidor na aba Etapas.
   const [stageStatus, setStageStatus] = useStageStatus();
   const [from, setFrom] = useSticky("from", () => "");
@@ -588,7 +588,7 @@ export function Dashboard({ view }: { view: View }) {
           {view === "stages" && (
             <>
               <div className="stage-status-bar">
-                <span className="muted">Negócios analisados</span>
+                <span className="muted">Tipo de etapa</span>
                 <StageStatusToggle
                   status={stageStatus}
                   onChange={setStageStatus}
@@ -615,9 +615,10 @@ export function Dashboard({ view }: { view: View }) {
                         zero e aparecem sem tempo (traço), só com as contagens.
                       </p>
                       <p>
-                        O seletor &quot;Negócios analisados&quot; escolhe entre
-                        os em andamento (padrão), os finalizados (ganhos e
-                        perdidos) ou os dois juntos.
+                        O seletor &quot;Tipo de etapa&quot; escolhe entre as
+                        etapas em andamento (padrão), as de conclusão (ganho e
+                        perda) ou todas; o tempo das etapas em andamento é o
+                        mesmo nas opções que as incluem.
                       </p>
                       <p>Cada pipeline é calculado separadamente.</p>
                     </div>

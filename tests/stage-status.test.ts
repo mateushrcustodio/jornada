@@ -10,8 +10,20 @@ const catalog: Catalog = {
   pipelines: [{ id: 0, name: "Comercial" }],
   stages: [
     { id: "NEW", name: "Entrada", categoryId: 0, color: "#7894bd", sort: 0 },
-    { id: "WORK", name: "Negociação", categoryId: 0, color: "#ee9900", sort: 1 },
-    { id: "WON", name: "Primeira Op", categoryId: 0, color: "#009900", sort: 2 },
+    {
+      id: "WORK",
+      name: "Negociação",
+      categoryId: 0,
+      color: "#ee9900",
+      sort: 1,
+    },
+    {
+      id: "WON",
+      name: "Primeira Op",
+      categoryId: 0,
+      color: "#009900",
+      sort: 2,
+    },
   ],
 };
 const open: Deal = {
@@ -63,68 +75,69 @@ const run = (stageStatus?: "open" | "closed" | "all") =>
 const stageIds = (data: ReturnType<typeof run>) =>
   data.retention.map((r) => r.stage.id).sort();
 
-describe("situação dos negócios na aba Etapas", () => {
-  it("em andamento (padrão) ignora os negócios ganhos e perdidos", () => {
+const byId = (data: ReturnType<typeof run>, id: string) =>
+  data.retention.find((r) => r.stage.id === id)!;
+
+describe("tipo de etapa na aba Etapas", () => {
+  it("em andamento mostra só as etapas normais, inclusive dos negócios que depois fecharam", () => {
     const data = run("open");
-    expect(new Set(data.movements.map((m) => m.deal.id))).toEqual(new Set([1]));
     expect(stageIds(data)).toEqual(["NEW", "WORK"]);
     expect(data.retention.every((r) => !r.final)).toBe(true);
-    expect(data.activeCount).toBe(1);
+    expect(byId(data, "NEW").visits).toBe(2);
+    expect(byId(data, "WORK").currentDeals).toBe(1);
   });
-  it("finalizados traz só os fechados; a etapa final fica sem tempo", () => {
+  it("finalizados mostra só as etapas de conclusão, sem tempo e sem negócios atuais", () => {
     const data = run("closed");
-    expect(new Set(data.movements.map((m) => m.deal.id))).toEqual(new Set([2]));
-    expect(stageIds(data)).toEqual(["NEW", "WON", "WORK"]);
-    const final = data.retention.find((r) => r.stage.id === "WON")!;
+    expect(stageIds(data)).toEqual(["WON"]);
+    const final = byId(data, "WON");
     expect(final.final).toBe(true);
     expect(final.visits).toBe(1);
     expect(final.sampleDeals).toBe(1);
     expect(final.average).toBe(0);
-    // O tempo das etapas anteriores do negócio fechado continua real.
-    expect(data.retention.find((r) => r.stage.id === "NEW")!.average).toBe(
-      4 * hour,
-    );
-    // Negócio fechado não é "atual" nem "parado".
     expect(data.retention.every((r) => r.currentDeals === 0)).toBe(true);
-    expect(data.activeCount).toBe(0);
+    expect(data.stalled).toHaveLength(0);
   });
-  it("em andamento + finalizados soma os dois grupos", () => {
-    const data = run("all");
-    expect(new Set(data.movements.map((m) => m.deal.id))).toEqual(
-      new Set([1, 2]),
-    );
-    expect(data.retention.find((r) => r.stage.id === "NEW")!.visits).toBe(2);
-    expect(data.retention.find((r) => r.stage.id === "WON")!.final).toBe(true);
+  it("em andamento + finalizados reúne as duas, e o tempo das etapas normais não muda", () => {
+    const open = run("open");
+    const all = run("all");
+    expect(stageIds(all)).toEqual(["NEW", "WON", "WORK"]);
+    expect(byId(all, "NEW")).toEqual(byId(open, "NEW"));
+    expect(byId(all, "WORK")).toEqual(byId(open, "WORK"));
+    expect(byId(all, "WON").final).toBe(true);
   });
-  it("sem o campo (Visão geral) o resultado é o mesmo de todos os negócios", () => {
+  it("sem o campo (Visão geral) o resultado é o mesmo de todas as etapas", () => {
     expect(run(undefined)).toEqual(run("all"));
   });
-  it("etapa de ganho reaberta, com duração real, deixa de ser final", () => {
+  it("etapa de ganho reaberta, com duração real, aparece em finalizados sem ser final", () => {
     const reopened = buildDashboard(
       [{ ...won, stageId: "WORK", stageSemanticId: "P" }],
       [entry(2, "WON", 5), entry(2, "WORK", 1)],
       catalog,
-      { ...base, stageStatus: "all" },
+      { ...base, stageStatus: "closed" },
       DEFAULT_SETTINGS,
       now,
       false,
     );
-    const stage = reopened.retention.find((r) => r.stage.id === "WON")!;
+    const stage = byId(reopened, "WON");
     expect(stage.average).toBe(4 * hour);
     expect(stage.final).toBe(false);
   });
   it("matchesStageStatus e o esquema aceitam só os três valores", () => {
-    expect(matchesStageStatus(open, "open")).toBe(true);
-    expect(matchesStageStatus(won, "open")).toBe(false);
-    expect(matchesStageStatus(won, "closed")).toBe(true);
-    expect(matchesStageStatus(open, "closed")).toBe(false);
-    expect(matchesStageStatus(won, "all")).toBe(true);
-    expect(matchesStageStatus(won)).toBe(true);
+    expect(matchesStageStatus("P", "open")).toBe(true);
+    expect(matchesStageStatus("S", "open")).toBe(false);
+    expect(matchesStageStatus("F", "closed")).toBe(true);
+    expect(matchesStageStatus("P", "closed")).toBe(false);
+    expect(matchesStageStatus("S", "all")).toBe(true);
+    expect(matchesStageStatus("S")).toBe(true);
     for (const status of STAGE_STATUSES) {
       expect(isStageStatus(status)).toBe(true);
-      expect(filtersSchema.safeParse({ ...base, stageStatus: status }).success).toBe(true);
+      expect(
+        filtersSchema.safeParse({ ...base, stageStatus: status }).success,
+      ).toBe(true);
     }
     expect(isStageStatus("tudo")).toBe(false);
-    expect(filtersSchema.safeParse({ ...base, stageStatus: "tudo" }).success).toBe(false);
+    expect(
+      filtersSchema.safeParse({ ...base, stageStatus: "tudo" }).success,
+    ).toBe(false);
   });
 });
