@@ -97,6 +97,10 @@ export interface Visit {
 export interface Movement extends Visit {
   deal: Deal;
   url?: string;
+  // Só nas passagens por etapa de conclusão (ganho/perda), quando a aba Etapas
+  // pede finalizados: tempo desde a primeira etapa registrada do negócio até
+  // esta passagem ("ciclo até concluir").
+  cycle?: number;
 }
 export interface StalledDeal {
   deal: Deal;

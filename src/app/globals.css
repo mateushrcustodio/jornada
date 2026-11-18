@@ -627,6 +627,60 @@ input[type="number"] {
   flex: none;
   font-size: 14px;
 }
+.retention-label .retention-value-note {
+  display: block;
+  color: var(--faint);
+  font-size: 11px;
+  font-weight: 400;
+  text-align: right;
+}
+/* Resumo das etapas de conclusão (sem tempo na etapa) na lista de etapas. */
+.retention-extra {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 10px 12px;
+  list-style: none;
+  border-radius: var(--radius-sm);
+  background: var(--soft);
+  color: var(--muted);
+  font-size: 12px;
+}
+.retention-extra strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.final-stage-list {
+  display: grid;
+  gap: 16px;
+}
+.final-stage-card {
+  display: grid;
+  gap: 14px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+}
+.final-stage-card > header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.final-stage-columns {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+.final-stage-columns h4 {
+  margin: 0 0 8px;
+  font-size: 13px;
+}
+@media (max-width: 760px) {
+  .final-stage-columns {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 .rank {
   display: none;
 }

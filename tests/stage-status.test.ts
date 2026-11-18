@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { buildDashboard, matchesStageStatus } from "@/lib/calculations";
 import { DEFAULT_SETTINGS, filtersSchema } from "@/lib/settings";
+import { buildStageInsights } from "@/lib/stage-insights";
 import { isStageStatus, STAGE_STATUSES } from "@/lib/stage-status";
 import type { Catalog, Deal, HistoryEntry } from "@/lib/types";
 
@@ -106,7 +107,14 @@ describe("tipo de etapa na aba Etapas", () => {
     expect(byId(all, "WON").final).toBe(true);
   });
   it("sem o campo (Visão geral) o resultado é o mesmo de todas as etapas", () => {
-    expect(run(undefined)).toEqual(run("all"));
+    const legacy = run(undefined);
+    const all = run("all");
+    // Só o ciclo até concluir (extra da aba Etapas) separa as duas respostas.
+    const noCycle = (data: typeof all) =>
+      data.movements.map(({ cycle, ...rest }) => (void cycle, rest));
+    expect(noCycle(all)).toEqual(noCycle(legacy));
+    expect(all.retention).toEqual(legacy.retention);
+    expect(legacy.movements.every((m) => m.cycle === undefined)).toBe(true);
   });
   it("etapa de ganho reaberta, com duração real, aparece em finalizados sem ser final", () => {
     const reopened = buildDashboard(
@@ -139,5 +147,82 @@ describe("tipo de etapa na aba Etapas", () => {
     expect(
       filtersSchema.safeParse({ ...base, stageStatus: "tudo" }).success,
     ).toBe(false);
+  });
+});
+
+describe("estatísticas das etapas de conclusão", () => {
+  // Negócio ganho: NEW 10h atrás, WORK 6h, WON 4h => ciclo de 6h até concluir.
+  // Segundo negócio perdido em outra etapa final, para testar ticket e médias.
+  const won2: Deal = {
+    id: 3,
+    title: "Ganho 2",
+    categoryId: 0,
+    stageId: "WON",
+    stageSemanticId: "S",
+    opportunity: 3000,
+    currencyId: "BRL",
+    assignedById: 7,
+    assignedByName: "Ana",
+  };
+  const wonValued: Deal = {
+    ...won,
+    opportunity: 1000,
+    currencyId: "BRL",
+    assignedById: 7,
+    assignedByName: "Ana",
+  };
+  const more = [
+    ...history,
+    entry(3, "NEW", 30),
+    entry(3, "WORK", 20),
+    entry(3, "WON", 2),
+  ];
+  const build = (stageStatus: "open" | "closed" | "all" | undefined) =>
+    buildDashboard(
+      [open, wonValued, won2],
+      more,
+      catalog,
+      { ...base, stageStatus },
+      DEFAULT_SETTINGS,
+      now,
+      false,
+    );
+  it("calcula o ciclo desde a primeira etapa só em finalizados e em todas", () => {
+    const cycles = (status: "open" | "closed" | "all" | undefined) =>
+      build(status)
+        .movements.filter((m) => m.cycle !== undefined)
+        .map((m) => [m.deal.id, m.cycle]);
+    expect(cycles("closed").sort()).toEqual([
+      [2, 6 * hour],
+      [3, 28 * hour],
+    ]);
+    expect(cycles("all").sort()).toEqual(cycles("closed").sort());
+    expect(cycles("open")).toEqual([]);
+    expect(cycles(undefined)).toEqual([]);
+  });
+  it("resume a etapa final com faturamento, ticket, ciclo, origem e responsável", () => {
+    const insights = buildStageInsights(build("closed"), []);
+    const stage = insights.pipelines[0].stages.find((s) => s.final)!;
+    expect(stage.stage.id).toBe("WON");
+    expect(stage.deals).toBe(2);
+    expect(stage.revenue).toBe(4000);
+    expect(stage.ticket).toBe(2000);
+    expect(stage.cycle).toEqual({
+      average: 17 * hour,
+      median: 17 * hour,
+      maximum: 28 * hour,
+      samples: 2,
+    });
+    expect(stage.sources.map((s) => [s.label, s.count])).toEqual([
+      ["Negociação", 2],
+    ]);
+    const ana = stage.assignees.find((a) => a.name === "Ana")!;
+    expect(ana.deals).toBe(2);
+    expect(ana.revenue).toBe(4000);
+  });
+  it("etapas normais não ganham ciclo", () => {
+    const insights = buildStageInsights(build("all"), []);
+    const normal = insights.pipelines[0].stages.filter((s) => !s.final);
+    expect(normal.every((s) => s.cycle === undefined)).toBe(true);
   });
 });

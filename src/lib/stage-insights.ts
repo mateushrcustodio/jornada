@@ -68,6 +68,14 @@ export interface BucketStat {
   open: number;
   revenue: number;
 }
+// Ciclo até concluir (etapas de ganho/perda): tempo desde a primeira etapa
+// registrada do negócio até a passagem pela etapa final.
+export interface CycleStat {
+  average: number;
+  median: number;
+  maximum: number;
+  samples: number;
+}
 export interface StageInsight {
   key: string;
   stage: Stage;
@@ -86,6 +94,11 @@ export interface StageInsight {
   currentDeals: number;
   stalledDeals: number;
   revenue: number;
+  // Valor médio por negócio (faturamento dividido pelos negócios na moeda
+  // principal); 0 quando não há negócios.
+  ticket: number;
+  // Só nas etapas finais, quando o painel traz o ciclo (aba Etapas com finalizados).
+  cycle?: CycleStat;
   stalledRevenue: number;
   // Média da etapa dividida pela média do funil (1 = igual à média).
   vsFunnel?: number;
@@ -300,6 +313,12 @@ export function buildStageInsights(
       item.count++;
       sources.set(k, item);
     }
+    const cycles = rows
+      .flatMap((row) => (row.cycle === undefined ? [] : [row.cycle]))
+      .sort((a, b) => a - b);
+    const dealsInCurrency = [...deals.values()].filter(
+      (deal) => (deal.currencyId || "BRL") === currency,
+    ).length;
     const insight: StageInsight = {
       key,
       stage: retention.stage,
@@ -318,6 +337,15 @@ export function buildStageInsights(
       currentDeals: retention.currentDeals,
       stalledDeals: retention.stalledDeals,
       revenue: sumDeals(deals.values()),
+      ticket: dealsInCurrency ? sumDeals(deals.values()) / dealsInCurrency : 0,
+      cycle: cycles.length
+        ? {
+            average: mean(cycles),
+            median: percentile(cycles, 0.5),
+            maximum: cycles[cycles.length - 1],
+            samples: cycles.length,
+          }
+        : undefined,
       stalledRevenue: sumDeals(stalled.map((row) => row.deal)),
       buckets: DURATION_BUCKETS.map((bucket, i) => {
         const min = i ? DURATION_BUCKETS[i - 1].max : 0;

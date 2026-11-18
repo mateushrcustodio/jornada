@@ -19,7 +19,7 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type {
   DashboardData,
   Catalog,
@@ -39,6 +39,11 @@ import type {
 } from "@/lib/types";
 import { PAGE_SIZE } from "@/lib/types";
 import { sortRetention, sortRetentionByMaximum } from "@/lib/stage-order";
+import {
+  buildStageInsights,
+  type StageInsight,
+  type StageInsights,
+} from "@/lib/stage-insights";
 import {
   dateTime,
   duration,
@@ -221,6 +226,13 @@ export function Dashboard({ view }: { view: View }) {
     DASHBOARD_CACHE_MS,
   );
   const data = resource.data;
+  // Análise por etapa (aba Etapas): alimenta o resumo das etapas de conclusão
+  // na lista e a janela de detalhes, calculada uma vez só.
+  const stageInsights = useMemo(
+    () =>
+      view === "stages" && data ? buildStageInsights(data, users) : undefined,
+    [view, data, users],
+  );
   // A página volta para a primeira ao mudar de aba, filtro, configuração ou
   // ao atualizar; a assinatura evita um efeito só para zerar o contador.
   const pageSignature = `${view}\n${body}\n${clock}\n${sort?.by}:${sort?.dir}\n${stalledSort?.by}:${stalledSort?.dir}`;
@@ -598,6 +610,7 @@ export function Dashboard({ view }: { view: View }) {
                 <RetentionChart
                   rows={data.retention}
                   pipelines={data.pipelines}
+                  insights={stageInsights}
                   full
                 />
                 <div className="stack">
@@ -612,7 +625,9 @@ export function Dashboard({ view }: { view: View }) {
                         Os contadores de negócios e parados representam a
                         posição atual, inclusive sem movimentações recentes.
                         Etapas concluídas de ganho ou perda têm duração final
-                        zero e aparecem sem tempo (traço), só com as contagens.
+                        zero: no lugar do tempo mostram o ciclo médio até
+                        concluir, o faturamento, de onde vieram e por
+                        responsável.
                       </p>
                       <p>
                         O seletor &quot;Tipo de etapa&quot; escolhe entre as
@@ -626,6 +641,7 @@ export function Dashboard({ view }: { view: View }) {
                   <StageTimePanel
                     data={data}
                     users={users}
+                    insights={stageInsights}
                     stalledHours={settings.stalledHours}
                   />
                 </div>
@@ -758,13 +774,76 @@ function Metrics({ data }: { data: DashboardData }) {
   );
 }
 
+// Resumo de uma etapa de conclusão na lista: o negócio fecha nela, então não há
+// tempo na etapa; mostra quanto foi concluído, o ciclo e de onde vieram.
+function FinalSummary({
+  stage,
+  currency,
+}: {
+  stage: StageInsight;
+  currency: string;
+}) {
+  const top = <T,>(items: T[], n: number) => items.slice(0, n);
+  const people = top(
+    [...stage.assignees].sort(
+      (a, b) => b.deals - a.deals || b.revenue - a.revenue,
+    ),
+    3,
+  );
+  const sources = top(stage.sources, 2);
+  return (
+    <ul className="retention-extra" aria-label="Estatísticas da etapa final">
+      <li>
+        Faturamento <strong>{money(stage.revenue, currency)}</strong>
+        {stage.ticket > 0 && (
+          <>
+            {" "}
+            · ticket <strong>{money(stage.ticket, currency)}</strong>
+          </>
+        )}
+      </li>
+      {stage.cycle && (
+        <li>
+          Ciclo: mediana <strong>{duration(stage.cycle.median)}</strong> · maior{" "}
+          <strong>{duration(stage.cycle.maximum)}</strong>
+        </li>
+      )}
+      {sources.length > 0 && (
+        <li>
+          Vieram de{" "}
+          {sources.map((item, i) => (
+            <span key={item.key}>
+              {i > 0 && ", "}
+              <strong>{item.label}</strong> ({item.count})
+            </span>
+          ))}
+        </li>
+      )}
+      {people.length > 0 && (
+        <li>
+          Por responsável{" "}
+          {people.map((person, i) => (
+            <span key={person.id ?? "none"}>
+              {i > 0 && ", "}
+              <strong>{person.name}</strong> ({person.deals})
+            </span>
+          ))}
+        </li>
+      )}
+    </ul>
+  );
+}
+
 function RetentionChart({
   rows,
   pipelines = [],
+  insights,
   full = false,
 }: {
   rows: Retention[];
   pipelines?: Pipeline[];
+  // Análise por etapa (aba Etapas): traz as estatísticas das etapas finais.
+  insights?: StageInsights;
   full?: boolean;
 }) {
   const [order, setOrder] = useStageOrder();
@@ -774,6 +853,10 @@ function RetentionChart({
     ? sortRetention(rows, order, pipelines)
     : rows.slice(0, 4);
   const max = Math.max(1, ...visible.map((r) => r.average));
+  const finals = new Map<string, StageInsight>();
+  for (const pipeline of insights?.pipelines ?? [])
+    for (const stage of pipeline.stages)
+      if (stage.final) finals.set(stage.key, stage);
   return (
     <Panel
       title="Tempo médio por etapa"
@@ -801,31 +884,47 @@ function RetentionChart({
         />
       ) : (
         <div className="retention-bars">
-          {visible.map((r) => (
-            <div
-              className="retention-row"
-              key={`${r.stage.categoryId}:${r.stage.id}`}
-            >
-              <div className="retention-label">
-                <div>
-                  <strong>{r.stage.name}</strong>
-                  <span>
-                    {r.pipeline} · {r.sampleDeals} negócios
-                  </span>
+          {visible.map((r) => {
+            const final = r.final
+              ? finals.get(`${r.stage.categoryId}:${r.stage.id}`)
+              : undefined;
+            return (
+              <div
+                className="retention-row"
+                key={`${r.stage.categoryId}:${r.stage.id}`}
+              >
+                <div className="retention-label">
+                  <div>
+                    <strong>{r.stage.name}</strong>
+                    <span>
+                      {r.pipeline} · {r.sampleDeals} negócios
+                    </span>
+                  </div>
+                  <strong className="retention-value">
+                    {!r.visits
+                      ? "Sem passagens"
+                      : final?.cycle
+                        ? duration(final.cycle.average)
+                        : r.final
+                          ? "—"
+                          : duration(r.average)}
+                    {final?.cycle && (
+                      <small className="retention-value-note">
+                        ciclo médio
+                      </small>
+                    )}
+                  </strong>
                 </div>
-                <strong className="retention-value">
-                  {!r.visits
-                    ? "Sem passagens"
-                    : r.final
-                      ? "—"
-                      : duration(r.average)}
-                </strong>
+                {final ? (
+                  <FinalSummary stage={final} currency={insights!.currency} />
+                ) : (
+                  <div className="bar-track">
+                    <span style={{ width: `${(r.average / max) * 100}%` }} />
+                  </div>
+                )}
               </div>
-              <div className="bar-track">
-                <span style={{ width: `${(r.average / max) * 100}%` }} />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
     </Panel>

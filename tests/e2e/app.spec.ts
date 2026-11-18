@@ -1127,7 +1127,15 @@ test("Etapas: seletor de tipo de etapa começa em Em andamento, mostra as etapas
   await request;
   await expect(closed).toHaveAttribute("aria-pressed", "true");
   await expect(row("Perdido")).toBeVisible();
-  await expect(row("Perdido").locator(".retention-value")).toHaveText("—");
+  // Sem tempo na etapa: mostra o ciclo médio e o resumo de conclusão.
+  await expect(row("Perdido").locator(".retention-value")).toContainText(
+    "ciclo médio",
+  );
+  const summary = row("Perdido").locator(".retention-extra");
+  await expect(summary).toContainText("Faturamento");
+  await expect(summary).toContainText("Ciclo: mediana");
+  await expect(summary).toContainText("Vieram de");
+  await expect(summary).toContainText("Por responsável");
   await expect(
     list.locator(".retention-row", { hasText: "Qualificação" }),
   ).toHaveCount(0);
@@ -1139,6 +1147,18 @@ test("Etapas: seletor de tipo de etapa começa em Em andamento, mostra as etapas
   expect(await row("Qualificação").locator(".retention-label").innerText()).toBe(
     openLabel,
   );
+  // A janela de detalhes traz o painel completo das etapas de conclusão.
+  await page.getByRole("button", { name: "Ver mais detalhes" }).click();
+  const dialog = page.getByRole("dialog");
+  await expect(
+    dialog.getByRole("heading", { name: "Etapas de conclusão" }),
+  ).toBeVisible();
+  const card = dialog.locator(".final-stage-card", { hasText: "Perdido" });
+  await expect(card).toContainText("Ticket médio");
+  await expect(card).toContainText("Ciclo médio até concluir");
+  await expect(card.getByRole("heading", { name: "De onde vieram" })).toBeVisible();
+  await expect(card.getByRole("heading", { name: "Por responsável" })).toBeVisible();
+  await dialog.getByRole("button", { name: "Fechar detalhes" }).click();
   // A escolha fica salva ao recarregar.
   await page.reload();
   await page.getByLabel("Período", { exact: true }).selectOption("30d");

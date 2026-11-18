@@ -109,14 +109,17 @@ export function StageTimePanel({
   data,
   users,
   stalledHours,
+  insights: provided,
 }: {
   data: DashboardData;
   users: UserOption[];
   stalledHours: number;
+  // Análise já calculada pela tela (evita calcular duas vezes).
+  insights?: StageInsights;
 }) {
   const insights = useMemo(
-    () => buildStageInsights(data, users),
-    [data, users],
+    () => provided ?? buildStageInsights(data, users),
+    [provided, data, users],
   );
   const [pipelineId, setPipelineId] = useState<number>();
   const [open, setOpen] = useState<{ stage?: string } | null>(null);
@@ -314,6 +317,7 @@ function StageTimeDialog({
     };
   }, []);
   const timed = pipeline.stages.filter((s) => !s.final);
+  const finals = pipeline.stages.filter((s) => s.final && s.passages > 0);
   const [chosen, setChosen] = useState(initialStage);
   const selected =
     timed.find((s) => s.key === chosen) ??
@@ -458,6 +462,24 @@ function StageTimeDialog({
             />
           )}
 
+          {finals.length > 0 && (
+            <section className="insight-section">
+              <div className="insight-section-heading">
+                <h3>Etapas de conclusão</h3>
+                <span className="muted">ganho e perda, sem tempo na etapa</span>
+              </div>
+              <div className="final-stage-list">
+                {finals.map((stage) => (
+                  <FinalStageCard
+                    key={stage.key}
+                    stage={stage}
+                    currency={cur}
+                  />
+                ))}
+              </div>
+            </section>
+          )}
+
           <section className="insight-section">
             <div className="insight-section-heading">
               <h3>Responsáveis no funil</h3>
@@ -480,6 +502,94 @@ function StageTimeDialog({
         </div>
       </div>
     </dialog>
+  );
+}
+
+// Etapa de conclusão (ganho/perda): como o negócio fecha nela, o tempo na etapa
+// é zero. O que importa é quanto foi concluído, de onde vieram e em quanto
+// tempo (ciclo desde a primeira etapa do negócio).
+function FinalStageCard({
+  stage,
+  currency,
+}: {
+  stage: StageInsight;
+  currency: string;
+}) {
+  const people = [...stage.assignees].sort(
+    (a, b) => b.deals - a.deals || b.revenue - a.revenue,
+  );
+  return (
+    <article className="final-stage-card">
+      <header>
+        <StageBadge stage={stage.stage} />
+        <span className="muted">
+          {plural(stage.deals, "negócio", "negócios")}
+          {stage.passages !== stage.deals &&
+            ` · ${plural(stage.passages, "passagem", "passagens")}`}
+        </span>
+      </header>
+      <div className="insight-stats">
+        <Stat
+          label="Faturamento"
+          value={money(stage.revenue, currency)}
+          detail="valor dos negócios, somado uma vez por negócio"
+        />
+        <Stat
+          label="Ticket médio"
+          value={stage.ticket ? money(stage.ticket, currency) : "—"}
+          detail="valor médio por negócio"
+        />
+        <Stat
+          label="Ciclo médio até concluir"
+          value={stage.cycle ? duration(stage.cycle.average) : "—"}
+          detail={
+            stage.cycle
+              ? `mediana ${duration(stage.cycle.median)} · maior ${duration(stage.cycle.maximum)}`
+              : "sem ciclo calculado"
+          }
+        />
+      </div>
+      <div className="final-stage-columns">
+        <div>
+          <h4>De onde vieram</h4>
+          {stage.sources.length ? (
+            <FlowList items={stage.sources} />
+          ) : (
+            <p className="muted">Sem etapa anterior no histórico.</p>
+          )}
+        </div>
+        <div>
+          <h4>Por responsável</h4>
+          <div className="table-scroll">
+            <table className="assignee-table">
+              <thead>
+                <tr>
+                  <th>Responsável</th>
+                  <th>Negócios</th>
+                  <th>Faturamento</th>
+                </tr>
+              </thead>
+              <tbody>
+                {people.slice(0, 8).map((person) => (
+                  <tr key={person.id ?? "none"}>
+                    <td>
+                      <strong>{person.name}</strong>
+                    </td>
+                    <td>{count(person.deals)}</td>
+                    <td>{money(person.revenue, currency)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {people.length > 8 && (
+            <p className="muted">
+              e mais {plural(people.length - 8, "pessoa", "pessoas")}
+            </p>
+          )}
+        </div>
+      </div>
+    </article>
   );
 }
 

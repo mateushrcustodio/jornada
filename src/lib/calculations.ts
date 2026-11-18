@@ -243,9 +243,16 @@ export function buildDashboard(
       deal,
       visits: calculateVisits(history, deal, catalog, now),
     }));
+  // O ciclo até concluir só é calculado quando a aba Etapas pede finalizados.
+  const withCycle =
+    filters.stageStatus === "closed" || filters.stageStatus === "all";
   const movements = allVisits
-    .flatMap(({ deal, visits }) =>
-      visits
+    .flatMap(({ deal, visits }) => {
+      // Primeira etapa registrada do negócio: início do ciclo até concluir.
+      const started = visits.length
+        ? Date.parse(visits[0].entry.CREATED_TIME)
+        : 0;
+      return visits
         .filter((v) => {
           const time = Date.parse(v.entry.CREATED_TIME);
           return (
@@ -255,8 +262,15 @@ export function buildDashboard(
             matchesStageStatus(v.entry.STAGE_SEMANTIC_ID, filters.stageStatus)
           );
         })
-        .map((v) => ({ ...v, deal, url: dealUrl(domain, deal.id) })),
-    )
+        .map((v) => ({
+          ...v,
+          deal,
+          url: dealUrl(domain, deal.id),
+          ...(withCycle && ["S", "F"].includes(v.entry.STAGE_SEMANTIC_ID)
+            ? { cycle: Math.max(0, Date.parse(v.entry.CREATED_TIME) - started) }
+            : {}),
+        }));
+    })
     .sort(
       (a, b) =>
         Date.parse(b.entry.CREATED_TIME) - Date.parse(a.entry.CREATED_TIME) ||
