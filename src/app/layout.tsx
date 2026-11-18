@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { AppProvider } from "@/components/provider";
 import { Shell } from "@/components/shell";
 import "./globals.css";
-import "./overview.css";
+import "./theme.css";
 export const metadata: Metadata = {
   title: "Jornada CRM · Inteligência em cada etapa",
   description:

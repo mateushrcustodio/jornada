@@ -6,10 +6,8 @@ import {
   ArrowUpDown,
   ArrowUpRight,
   CalendarDays,
-  Check,
   CircleDollarSign,
   Clock3,
-  Flag,
   GripVertical,
   Layers3,
   Pause,
@@ -20,6 +18,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
+import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import type {
@@ -285,19 +284,14 @@ export function Dashboard({ view }: { view: View }) {
       >
         {view === "overview" && (
           <div className="overview-hero-art" aria-hidden="true">
-            <span className="overview-glass-ribbon" />
-            <span className="overview-prism overview-prism-start">
-              <Check />
-            </span>
-            <span className="overview-prism overview-prism-route">
-              <Route />
-            </span>
-            <span className="overview-prism overview-prism-done">
-              <Check />
-            </span>
-            <span className="overview-prism overview-prism-end">
-              <Flag />
-            </span>
+            <Image
+              src="/jornada-hero.webp"
+              alt=""
+              width={1100}
+              height={600}
+              loading="eager"
+              unoptimized
+            />
           </div>
         )}
         <div>

@@ -1,5 +1,5 @@
-/* A camada de materiais da Visão geral usa os componentes de dados do painel. */
-.overview-shell {
+/* Shared visual theme, with dashboard-specific composition. */
+.jornada-shell {
   --ink: #172342;
   --muted: #53617a;
   --faint: var(--muted);
@@ -16,9 +16,7 @@
   --red: #a3363d;
   --red-ink: var(--red);
   --blue-light: #c1dcfa;
-  --lilac-light: #b1c1f6;
   --mint-light: #b8eade;
-  --coral-light: #f89e8c;
   --radius-lg: 24px;
   --radius-md: 14px;
   --radius-pill: 999px;
@@ -29,6 +27,19 @@
   --glass-rim: inset 0 1px 1px #fff, inset 0 -2px 3px rgb(114 130 183 / 12%);
   --glass-fill: rgb(255 255 255 / 74%);
   --glass-filter: blur(12px);
+  --overlay-filter: blur(4px);
+  --banner-fill:
+    radial-gradient(
+      ellipse at 91% -25%,
+      rgb(181 228 216 / 72%),
+      transparent 58%
+    ),
+    radial-gradient(
+      ellipse at 8% 128%,
+      rgb(187 195 247 / 65%),
+      transparent 64%
+    ),
+    #eef3fd;
   --hero-fallback: #182454;
 
   display: flow-root;
@@ -48,12 +59,12 @@
     var(--canvas);
 }
 
-.overview-shell :is(.topnav, .main-content) {
+.jornada-shell :is(.topnav, .main-content) {
   width: min(1320px, calc(100% - var(--gutter) * 2));
   margin-inline: auto;
 }
 
-.overview-shell .topnav {
+.jornada-shell .topnav {
   display: grid;
   grid-template-columns: minmax(max-content, 1fr) auto minmax(max-content, 1fr);
   align-items: center;
@@ -66,13 +77,13 @@
 @supports (
   (backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))
 ) {
-  .overview-shell .topnav {
+  .jornada-shell .topnav {
     -webkit-backdrop-filter: var(--glass-filter);
     backdrop-filter: var(--glass-filter);
   }
 }
 
-.overview-shell :is(.brand, .nav-pills, .topnav-right) {
+.jornada-shell :is(.brand, .nav-pills, .topnav-right) {
   border: 1px solid rgb(255 255 255 / 86%);
   border-radius: var(--radius-pill);
   background: var(--glass-fill);
@@ -81,7 +92,7 @@
     0 8px 20px -12px rgb(38 51 106 / 36%);
 }
 
-.overview-shell .brand {
+.jornada-shell .brand {
   justify-self: start;
   min-height: 50px;
   gap: 9px;
@@ -90,15 +101,15 @@
   font-weight: 750;
 }
 
-.overview-shell .brand-mark {
+.jornada-shell .brand-mark {
   width: 36px;
   height: 36px;
-  color: #3154ba;
+  object-fit: cover;
   border-radius: 9px;
   box-shadow: 0 3px 7px rgb(36 69 159 / 28%);
 }
 
-.overview-shell .nav-pills {
+.jornada-shell .nav-pills {
   justify-content: center;
   flex-wrap: wrap;
   gap: 3px;
@@ -107,11 +118,7 @@
   overflow: visible;
 }
 
-.overview-shell .nav-indicator {
-  display: none;
-}
-
-.overview-shell .nav-link {
+.jornada-shell .nav-link {
   justify-content: center;
   gap: 7px;
   min-height: 44px;
@@ -124,11 +131,11 @@
     color 160ms ease;
 }
 
-.overview-shell .nav-link:hover {
+.jornada-shell .nav-link:hover {
   background: #eff2fc;
 }
 
-.overview-shell .nav-link[aria-current="page"] {
+.jornada-shell .nav-link[aria-current="page"] {
   border-color: #27448b;
   color: #fff;
   background:
@@ -144,14 +151,14 @@
     0 4px 9px rgb(34 67 148 / 27%);
 }
 
-.overview-shell .topnav-right {
+.jornada-shell .topnav-right {
   justify-self: end;
   gap: 3px;
   max-width: 100%;
   padding: 3px;
 }
 
-.overview-shell .topnav-right .icon-button {
+.jornada-shell .topnav-right .icon-button {
   flex: none;
   width: 44px;
   height: 44px;
@@ -160,13 +167,14 @@
   background: transparent;
 }
 
-.overview-shell .topnav-right .icon-button:hover,
-.overview-shell .topnav-right .transparency-toggle[aria-pressed="true"] {
+.jornada-shell .topnav-right .icon-button:hover,
+.jornada-shell .topnav-right .icon-button[aria-current="page"],
+.jornada-shell .topnav-right .transparency-toggle[aria-pressed="true"] {
   background: #e1e9ff;
   color: #223e87;
 }
 
-.overview-shell .demo-chip {
+.jornada-shell .demo-chip {
   margin-inline: 4px;
   border-color: #dadff2;
   border-radius: var(--radius-pill);
@@ -174,12 +182,39 @@
   color: #454779;
 }
 
-.overview-shell .main-content {
+.jornada-shell .main-content {
   padding: 20px 0 0;
 }
 
-.overview-shell .main-content > * {
+.jornada-shell .main-content > * {
   animation: none;
+}
+
+.jornada-shell .page-heading:not(.overview-hero),
+.card-shell .journey-heading {
+  padding: clamp(16px, 2.4vw, 30px);
+  border: 1px solid #fff;
+  border-radius: var(--radius-lg);
+  background: var(--banner-fill);
+  box-shadow: var(--glass-rim), var(--elevation);
+}
+
+.jornada-shell .page-heading:not(.overview-hero) h1,
+.card-shell .journey-heading h1 {
+  color: var(--ink);
+  font-size: clamp(1.55rem, 1.1rem + 1.55vw, 2.65rem);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: -0.038em;
+  overflow-wrap: anywhere;
+}
+
+.jornada-shell .page-heading:not(.overview-hero) p {
+  font-size: 0.875rem;
+}
+
+.jornada-shell .page-heading:not(.overview-hero) .last-query {
+  color: var(--muted);
 }
 
 .overview-shell .overview-hero {
@@ -189,7 +224,7 @@
   justify-items: start;
   align-content: center;
   gap: 22px;
-  min-height: 196px;
+  min-height: 232px;
   overflow: hidden;
   margin-bottom: 14px;
   padding: 22px clamp(22px, 4vw, 54px);
@@ -250,153 +285,31 @@
 
 .overview-hero-art {
   position: absolute;
-  z-index: -1;
-  inset: -15px 2% -15px auto;
-  width: min(56%, 690px);
-  pointer-events: none;
-}
-
-.overview-glass-ribbon {
-  position: absolute;
-  inset: 37% 4% 27% 5%;
-  transform: rotate(-11deg);
-  border: 1px solid rgb(224 242 255 / 78%);
-  border-radius: 52% 48% 52% 48% / 71% 67% 33% 29%;
-  background:
-    radial-gradient(ellipse at 32% 2%, rgb(251 252 255 / 80%), transparent 51%),
-    linear-gradient(
-      104deg,
-      rgb(167 185 255 / 69%),
-      rgb(117 181 241 / 20%) 43%,
-      rgb(171 255 229 / 56%) 76%,
-      rgb(254 164 156 / 73%)
-    );
-  box-shadow:
-    inset 0 2px 4px rgb(246 253 255 / 90%),
-    inset 0 -10px 9px rgb(21 45 122 / 45%),
-    0 20px 26px -12px rgb(11 26 77 / 59%);
-}
-
-.overview-glass-ribbon::after {
-  position: absolute;
-  inset: 11% 4% 29%;
-  border-radius: inherit;
-  border-top: 1px solid rgb(255 255 255 / 83%);
-  border-bottom: 2px solid rgb(216 250 255 / 39%);
-  content: "";
-}
-
-.overview-prism {
-  --glass-tint: color-mix(in srgb, var(--lilac-light) 75%, transparent);
-  position: absolute;
+  z-index: 0;
+  inset: 5px clamp(10px, 4vw, 52px) 5px auto;
+  width: min(55%, 640px);
   display: grid;
-  place-items: center;
-  width: clamp(49px, 6.8vw, 98px);
-  aspect-ratio: 1.1;
-  border: 1px solid rgb(246 252 255 / 87%);
-  border-radius: 36% 39% 36% 38%;
-  color: #fff;
-  background:
-    radial-gradient(
-      ellipse at 31% -2%,
-      rgb(255 255 255 / 99%),
-      transparent 58%
-    ),
-    linear-gradient(
-      145deg,
-      rgb(227 246 255 / 45%),
-      var(--glass-tint) 46%,
-      rgb(39 67 148 / 46%)
-    );
-  box-shadow:
-    inset 0 2px 4px #fff,
-    inset 0 -7px 8px rgb(24 46 118 / 28%),
-    0 13px 26px rgb(16 29 73 / 33%);
+  align-items: center;
+  pointer-events: none;
+  mix-blend-mode: screen;
+  /* Mantém a composição da arte com o fundo no Chromium desktop. */
+  mask-image: linear-gradient(#000, #000);
 }
 
-.overview-prism svg {
-  width: 36%;
-  height: auto;
-  filter: drop-shadow(0 2px 3px rgb(36 55 111 / 65%));
-  stroke-width: 2.3;
-}
-
-.overview-prism-start {
-  top: 50%;
-  left: 15%;
-  transform: rotate(-15deg);
-}
-
-.overview-prism-route {
-  --glass-tint: rgb(113 166 255 / 75%);
-  top: 16%;
-  left: 36%;
-  z-index: 1;
-  width: clamp(116px, 14vw, 192px);
-  aspect-ratio: 1.23;
-  overflow: hidden;
-  transform: rotate(-16deg);
-  border-radius: 28%;
-  box-shadow:
-    inset 0 3px 4px #fff,
-    inset 2px 0 10px rgb(228 246 255 / 60%),
-    inset 0 -12px 18px rgb(49 85 163 / 38%),
-    0 18px 32px rgb(13 25 73 / 54%);
-}
-
-.overview-prism-route::before {
-  position: absolute;
-  inset: 12%;
-  border: 1px solid rgb(245 253 255 / 72%);
-  border-radius: 26%;
-  background: linear-gradient(
-    160deg,
-    rgb(249 254 255 / 32%),
-    transparent 58%,
-    rgb(193 229 255 / 31%)
-  );
-  box-shadow: inset 0 -4px 8px rgb(23 66 163 / 34%);
-  content: "";
-}
-
-/* A faixa dentro da lente segue outra curvatura, sugerindo o desvio da luz. */
-.overview-prism-route::after {
-  position: absolute;
-  inset: 39% -9% auto;
-  height: 33%;
-  transform: rotate(10deg);
-  border-block: 1px solid rgb(241 251 255 / 64%);
-  border-radius: 48%;
-  background: linear-gradient(
-    115deg,
-    rgb(220 243 255 / 45%),
-    rgb(138 202 255 / 10%) 58%,
-    rgb(192 233 255 / 55%)
-  );
-  box-shadow: 0 3px 7px rgb(195 229 255 / 31%);
-  content: "";
-}
-
-.overview-prism-route svg {
+.overview-hero > :not(.overview-hero-art) {
   position: relative;
   z-index: 1;
 }
 
-.overview-prism-done {
-  --glass-tint: rgb(116 231 194 / 78%);
-  top: 49%;
-  left: 66%;
-  transform: rotate(11deg);
+.overview-hero-art img {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  object-fit: contain;
+  object-position: right center;
 }
 
-.overview-prism-end {
-  --glass-tint: color-mix(in srgb, var(--coral-light) 90%, transparent);
-  top: 20%;
-  left: 81%;
-  transform: rotate(13deg);
-}
-
-.overview-shell :is(button, a, input, select):focus-visible {
+.jornada-shell :is(button, a, input, select):focus-visible {
   outline: 2px solid #234a99;
   outline-offset: 2px;
   box-shadow: 0 0 0 2px #fff;
@@ -407,13 +320,21 @@
   outline-offset: 4px;
 }
 
-.overview-shell .button {
+.jornada-shell .button {
   min-height: 44px;
   border-radius: var(--radius-md);
   font-weight: 650;
 }
 
-.overview-shell .filters {
+.jornada-shell .button.primary {
+  background: var(--blue);
+}
+
+.jornada-shell .button.primary:hover:not(:disabled) {
+  background: var(--blue-deep);
+}
+
+.jornada-shell .filters {
   gap: 8px;
   padding: 8px;
   border: 1px solid #fff;
@@ -422,36 +343,36 @@
   box-shadow: var(--elevation);
 }
 
-.overview-shell .filter {
+.jornada-shell .filter {
   min-width: 0;
   max-width: 100%;
   border-radius: 11px;
   background: var(--surface);
 }
 
-.overview-shell .filter select {
+.jornada-shell .filter select {
   min-width: 0;
   min-height: 42px;
   text-overflow: ellipsis;
 }
 
-.overview-shell .filter-range {
+.jornada-shell .filter-range {
   min-height: 44px;
   flex-wrap: wrap;
 }
 
-.overview-shell .filter:has(select:disabled) {
+.jornada-shell .filter:has(select:disabled) {
   border-color: var(--line);
   background: #edf0f6;
 }
 
-.overview-shell .filter select:disabled {
+.jornada-shell .filter select:disabled {
   color: var(--muted);
   opacity: 1;
   cursor: default;
 }
 
-.overview-shell .dashboard-body {
+.jornada-shell .dashboard-body {
   gap: var(--gap);
   margin-top: var(--gap);
 }
@@ -572,7 +493,7 @@
   font-size: 0.8125rem;
 }
 
-.overview-shell .panel {
+.jornada-shell .panel {
   min-width: 0;
   padding: clamp(14px, 2vw, 24px);
   border: 1px solid #fff;
@@ -581,19 +502,183 @@
   box-shadow: var(--elevation);
 }
 
-.overview-shell .panel-heading {
+.jornada-shell .panel-heading {
+  flex-wrap: wrap;
   gap: 8px;
   margin-bottom: 14px;
 }
 
-.overview-shell .panel-heading h2 {
+.jornada-shell :is(.panel-actions, .mode-toggle) {
+  max-width: 100%;
+  flex-wrap: wrap;
+}
+
+.jornada-shell .panel-heading h2 {
   font-size: clamp(1rem, 0.88rem + 0.4vw, 1.25rem);
   font-weight: 700;
   letter-spacing: -0.027em;
 }
 
-.overview-shell .panel-heading .icon-button,
-.overview-shell .stalled-item .icon-button {
+.jornada-shell .table-scroll {
+  max-width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md);
+}
+
+.jornada-shell .table-scroll thead {
+  background: var(--soft);
+}
+
+.jornada-shell .table-scroll th {
+  color: var(--muted);
+  font-weight: 700;
+}
+
+.jornada-shell .table-scroll tbody tr:hover {
+  background: #f5f7fd;
+}
+
+.jornada-shell :is(.info-banner, .context-note) {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  border-color: #d5e0f5;
+  border-radius: var(--radius-md);
+  background: #edf3fc;
+}
+
+.jornada-shell .info-banner > span {
+  min-width: 0;
+}
+
+.jornada-shell :is(.settings-layout, .settings-column, .install-grid, .split) {
+  gap: var(--gap);
+}
+
+.jornada-shell :is(.settings-emblem, .install-logo) {
+  flex: none;
+  border: 1px solid #fff;
+  border-radius: 18px;
+  background: #e7ebff;
+  color: var(--blue-deep);
+  box-shadow: var(--glass-rim), var(--elevation);
+}
+
+.jornada-shell .install-mark {
+  width: 42px;
+  height: 42px;
+  object-fit: cover;
+  border-radius: 12px;
+}
+
+.jornada-shell
+  :is(
+    .form-field select,
+    .form-field input,
+    .placement-preview,
+    .integration-privacy
+  ) {
+  border-radius: var(--radius-md);
+}
+
+.jornada-shell :is(.placement-preview, .analysis-explainer) {
+  background: var(--soft);
+}
+
+.jornada-shell .analysis-explainer {
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+}
+
+.jornada-shell .insight-dialog {
+  border: 1px solid var(--line);
+  background: var(--surface);
+  box-shadow: 0 24px 70px -24px rgb(14 28 70 / 50%);
+}
+
+.jornada-shell .insight-dialog::backdrop {
+  background: rgb(20 32 66 / 53%);
+  -webkit-backdrop-filter: var(--overlay-filter);
+  backdrop-filter: var(--overlay-filter);
+}
+
+.jornada-shell .insight-header {
+  background: var(--banner-fill);
+}
+
+.jornada-shell .insight-body {
+  background: var(--surface);
+}
+
+.jornada-shell.card-shell {
+  padding: clamp(12px, 2.3vw, 28px);
+}
+
+.card-shell .card-content {
+  max-width: 1060px;
+  margin-inline: auto;
+}
+
+.card-shell .journey-status {
+  flex-wrap: wrap;
+  gap: 6px 10px;
+}
+
+.card-shell .journey-status .pipeline-context {
+  color: var(--ink);
+}
+
+.card-shell :is(.journey-brand, .journey-heading .icon-button) {
+  min-height: 44px;
+  border: 1px solid #fff;
+  border-radius: var(--radius-pill);
+  background: var(--glass-fill);
+  box-shadow: var(--glass-rim), var(--elevation);
+}
+
+.card-shell .journey-heading .icon-button {
+  width: 44px;
+}
+
+.card-shell .journey-brand .brand-mark {
+  width: 30px;
+  height: 30px;
+}
+
+.card-shell .journey-stats {
+  gap: 10px;
+  border: 0;
+  background: none;
+}
+
+.card-shell .journey-stats .stat-card {
+  border: 1px solid #fff;
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  box-shadow: var(--elevation);
+}
+
+.card-shell .journey-stats .stat-card:first-child {
+  background: #e8eeff;
+}
+
+.card-shell :is(.timeline-card, .autopsy > div) {
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: var(--soft);
+}
+
+.card-shell .timeline-item.current .timeline-card {
+  background: #e9efff;
+  box-shadow: inset 0 0 0 1px #c6d4f2;
+}
+
+.card-shell .timeline-side {
+  flex-wrap: wrap;
+}
+
+.jornada-shell .panel-heading .icon-button,
+.jornada-shell .stalled-item .icon-button {
   width: 44px;
   height: 44px;
   border-color: #d9e2f7;
@@ -602,12 +687,12 @@
   background: #f2f5ff;
 }
 
-.overview-shell .attention-count {
+.jornada-shell .attention-count {
   color: var(--red-ink);
   background: #fce9e5;
 }
 
-.overview-shell :is(.count-badge, .attention-count) {
+.jornada-shell :is(.count-badge, .attention-count) {
   border-radius: var(--radius-pill);
   white-space: nowrap;
 }
@@ -636,54 +721,54 @@
   text-align: right;
 }
 
-.overview-shell .bar-track {
+.jornada-shell .bar-track {
   height: 7px;
   background: #dce4f3;
 }
 
-.overview-shell .bar-track > span {
+.jornada-shell .bar-track > span {
   background: linear-gradient(90deg, #3552aa, #5772c1);
 }
 
-.overview-shell :is(.movement-row, .stalled-item, .tracked-deal-row) {
+.jornada-shell :is(.movement-row, .stalled-item, .tracked-deal-row) {
   padding-inline: 6px;
   border-radius: 0;
 }
 
-.overview-shell
+.jornada-shell
   :is(.row-main strong, .tracked-deal-main strong, .stalled-item-top strong) {
   overflow: visible;
   overflow-wrap: anywhere;
   white-space: normal;
 }
 
-.overview-shell :is(.row-stages, .stage-badge) {
+.jornada-shell :is(.row-stages, .stage-badge) {
   min-width: 0;
   overflow-wrap: anywhere;
   white-space: normal;
 }
 
-.overview-shell .row-stages {
+.jornada-shell .row-stages {
   flex-wrap: wrap;
 }
 
-.overview-shell .stage-badge {
+.jornada-shell .stage-badge {
   padding: 2px 7px;
   border-radius: var(--radius-pill);
   background: var(--soft);
 }
 
-.overview-shell .critical .stalled-time span:last-child {
+.jornada-shell .critical .stalled-time span:last-child {
   padding: 2px 7px;
   border-radius: var(--radius-pill);
   background: #fce9e5;
 }
 
-.overview-shell :is(.empty-state, .error-state) {
+.jornada-shell :is(.empty-state, .error-state) {
   background: var(--surface);
 }
 
-.overview-shell .skeleton {
+.jornada-shell .skeleton {
   border: 1px solid var(--line);
   background: var(--soft-strong);
 }
@@ -727,12 +812,12 @@
 }
 
 @media (max-width: 950px) {
-  .overview-shell .topnav {
+  .jornada-shell .topnav {
     grid-template-columns: minmax(0, 1fr) auto;
     gap: 8px;
   }
 
-  .overview-shell .nav-pills {
+  .jornada-shell .nav-pills {
     grid-column: 1 / -1;
     order: 1;
     justify-self: start;
@@ -740,27 +825,27 @@
 }
 
 @media (max-width: 660px) {
-  .overview-shell .topnav {
+  .jornada-shell .topnav {
     margin-top: 12px;
   }
 
-  .overview-shell .nav-pills {
+  .jornada-shell .nav-pills {
     display: grid;
     grid-template-columns: repeat(4, auto);
     width: 100%;
     justify-content: space-between;
   }
 
-  .overview-shell .nav-link {
+  .jornada-shell .nav-link {
     padding-inline: 7px;
     font-size: 0.75rem;
   }
 
-  .overview-shell .nav-link svg {
+  .jornada-shell .nav-link svg {
     display: none;
   }
 
-  .overview-shell .main-content {
+  .jornada-shell .main-content {
     padding-top: 14px;
   }
 
@@ -778,63 +863,80 @@
     mask-image: linear-gradient(90deg, transparent 4%, #000 46%);
   }
 
-  .overview-prism-route {
-    width: 85px;
-  }
-
   .overview-shell .overview-hero p {
     max-width: 24ch;
   }
 
-  .overview-shell .stalled-time {
+  .jornada-shell .stalled-time {
+    flex-wrap: wrap;
+  }
+
+  .jornada-shell .info-banner {
     flex-wrap: wrap;
   }
 }
 
 @media (max-width: 680px) {
-  .overview-shell .filters {
+  .jornada-shell .filters {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .overview-shell .filter select {
+  .jornada-shell .filter select {
     width: 100%;
     padding-right: 24px;
     background-position: right 6px center;
   }
 
-  .overview-shell .filter-range {
+  .jornada-shell .filter-range {
     grid-column: 1 / -1;
   }
 
-  .overview-shell .filters .text-button {
+  .jornada-shell .filter-range input {
+    flex: 1 1 0;
+    min-width: 4.2em;
+  }
+
+  .jornada-shell .filters .text-button {
     justify-self: start;
   }
 }
 
 @media (max-width: 365px) {
-  .overview-shell .filters {
+  .jornada-shell .filters {
     grid-template-columns: minmax(0, 1fr);
   }
 }
 
 @media (max-width: 400px) {
-  .overview-shell .topnav {
+  .jornada-shell .topnav {
     grid-template-columns: auto minmax(0, 1fr);
   }
 
-  .overview-shell .topnav-right {
+  .jornada-shell .brand {
+    gap: 6px;
+    padding-right: 10px;
+    font-size: 14px;
+  }
+
+  .jornada-shell .brand .brand-mark {
+    width: 32px;
+    height: 32px;
+  }
+
+  .jornada-shell .topnav-right {
     flex-wrap: wrap;
     justify-content: end;
   }
 
-  .overview-shell .nav-link {
+  .jornada-shell .nav-link {
     padding-inline: 4px;
   }
 
-  .overview-shell .demo-chip {
+  .jornada-shell .demo-chip {
+    margin-inline: 0;
     padding-inline: 6px;
-    font-size: 11px;
+    font-size: 10px;
   }
 
   .overview-shell .stat-card {
@@ -842,13 +944,28 @@
   }
 }
 
-.overview-shell[data-reduced-transparency] {
+@media (max-width: 365px) {
+  .jornada-shell .topnav-right:has(.demo-chip) {
+    display: grid;
+    grid-template-columns: repeat(2, max-content);
+    justify-content: center;
+    justify-items: center;
+  }
+
+  .jornada-shell .demo-chip {
+    grid-column: 1 / -1;
+  }
+}
+
+.jornada-shell[data-reduced-transparency] {
   --glass-fill: #fff;
   --glass-filter: none;
+  --overlay-filter: none;
+  --banner-fill: #eef3fd;
   background: var(--canvas);
 }
 
-.overview-shell[data-reduced-transparency] .overview-hero {
+.jornada-shell[data-reduced-transparency] .overview-hero {
   background: var(--hero-fallback);
 }
 
@@ -856,15 +973,17 @@
   background: var(--stat-base);
 }
 
-.overview-shell[data-reduced-transparency] .overview-hero-art,
+.jornada-shell[data-reduced-transparency] .overview-hero-art,
 .overview-shell[data-reduced-transparency] .stat-card::before {
   display: none;
 }
 
 @media (prefers-reduced-transparency: reduce) {
-  .overview-shell {
+  .jornada-shell {
     --glass-fill: #fff;
     --glass-filter: none;
+    --overlay-filter: none;
+    --banner-fill: #eef3fd;
     background: var(--canvas);
   }
 
@@ -887,7 +1006,7 @@
     display: none;
   }
 
-  .overview-shell
+  .jornada-shell
     :is(
       .nav-link[aria-current="page"],
       .transparency-toggle[aria-pressed="true"]
@@ -895,8 +1014,7 @@
     border-color: Highlight;
   }
 
-  .overview-shell
-    :is(button, a, input, select, .overview-hero *):focus-visible {
+  .jornada-shell :is(button, a, input, select, .overview-hero *):focus-visible {
     outline-color: Highlight;
   }
 }

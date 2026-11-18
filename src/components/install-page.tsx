@@ -1,7 +1,8 @@
 "use client";
-import { Check, ExternalLink, Link2, Route, ShieldCheck } from "lucide-react";
+import { Check, ExternalLink, Link2, ShieldCheck } from "lucide-react";
 import Script from "next/script";
 import { useState } from "react";
+import { BrandMark } from "./brand";
 import { useApp } from "./provider";
 import { Panel } from "./ui";
 declare global {
@@ -73,7 +74,7 @@ export function InstallPage() {
         <Panel title="Uma integração, dois pontos de vista">
           <div className="install-content">
             <span className="install-logo">
-              <Route size={35} />
+              <BrandMark className="install-mark" />
             </span>
             <h3>Do panorama ao detalhe.</h3>
             <p>

@@ -55,6 +55,7 @@ test("visão geral cabe em iframe estreito e lembra a transparência reduzida", 
 
   await expect(movement).toBeVisible();
   await expect(headerArt).toBeVisible();
+  await expect(headerArt.locator("img")).toHaveJSProperty("naturalWidth", 1100);
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   expect(
     await frame.locator("html").evaluate((html) => html.scrollWidth),
@@ -73,7 +74,8 @@ test("visão geral cabe em iframe estreito e lembra a transparência reduzida", 
   await expect(
     frame.getByRole("heading", { name: "Movimentações", exact: true }),
   ).toBeVisible();
-  await expect(toggle).toHaveCount(0);
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(frame.locator(".topnav")).toHaveCSS("backdrop-filter", "none");
 });
 
 test("jornada mostra timeline e dados próprios do histórico", async ({
@@ -88,9 +90,9 @@ test("jornada mostra timeline e dados próprios do histórico", async ({
   await expect(
     page.getByText("Movido por Mariana Silva").first(),
   ).toBeVisible();
-  await expect(page.locator(".journey-heading")).not.toContainText(
-    "Enterprise",
-  );
+  await expect(
+    page.locator(".journey-heading .pipeline-context"),
+  ).toHaveText("Enterprise");
   expect(
     await page.evaluate(
       () => document.documentElement.scrollWidth <= window.innerWidth,
