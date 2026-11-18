@@ -1,5 +1,5 @@
 "use client";
-import { ArrowLeft, Settings2 } from "lucide-react";
+import { ArrowLeft, Layers2, Settings2 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -19,6 +19,7 @@ const navigation = [
   { href: "/dashboard/stalled", label: "Parados" },
   { href: "/dashboard/stages", label: "Etapas" },
 ];
+const transparencyKey = "jornada-crm.reduce-transparency";
 
 function NavPills({ path }: { path: string }) {
   const container = useRef<HTMLElement>(null);
@@ -81,6 +82,28 @@ export function Shell({ children }: { children: ReactNode }) {
   const path = usePathname();
   const { demo } = useApp();
   const returnCard = useReturnCard();
+  const overview = path === "/dashboard";
+  const [reduceTransparency, setReduceTransparency] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(transparencyKey) === "true";
+      if (saved) queueMicrotask(() => setReduceTransparency(true));
+    } catch {
+      // O iframe pode restringir o armazenamento local.
+    }
+  }, []);
+
+  function toggleTransparency() {
+    const next = !reduceTransparency;
+    setReduceTransparency(next);
+    try {
+      localStorage.setItem(transparencyKey, String(next));
+    } catch {
+      // A escolha ainda vale enquanto a aplicação estiver aberta.
+    }
+  }
+
   // Dentro do card do Bitrix24 só o conteúdo da aba aparece, sem navegação.
   if (path.startsWith("/deal/"))
     return (
@@ -94,7 +117,10 @@ export function Shell({ children }: { children: ReactNode }) {
       </div>
     );
   return (
-    <div className="app-shell">
+    <div
+      className={overview ? "app-shell overview-shell" : "app-shell"}
+      data-reduced-transparency={(overview && reduceTransparency) || undefined}
+    >
       <a href="#main-content" className="skip-link">
         Pular para o conteúdo
       </a>
@@ -106,6 +132,18 @@ export function Shell({ children }: { children: ReactNode }) {
         <NavPills path={path} />
         <div className="topnav-right">
           {demo && <span className="demo-chip">Modo demonstração</span>}
+          {overview && (
+            <button
+              type="button"
+              className="icon-button transparency-toggle"
+              aria-label="Sempre reduzir transparência"
+              aria-pressed={reduceTransparency}
+              title="Sempre reduzir transparência"
+              onClick={toggleTransparency}
+            >
+              <Layers2 size={18} aria-hidden="true" />
+            </button>
+          )}
           <Link
             href="/settings"
             className="icon-button"

@@ -763,9 +763,14 @@ function Metrics({ data }: { data: DashboardData }) {
     <div className="stat-grid">
       {metrics
         .filter((m) => settings.indicators[m.key])
-        .map(({ key, label, value, detail, color }) => (
+        .map(({ key, label, value, detail, icon: Icon, color }) => (
           <article className={`stat-card stat-${color}`} key={key}>
-            <div className="stat-top">{label}</div>
+            <div className="stat-top">
+              <span>{label}</span>
+              <span className="stat-icon" aria-hidden="true">
+                <Icon size={18} />
+              </span>
+            </div>
             <strong className="stat-value">{value}</strong>
             <span className="stat-detail">{detail}</span>
           </article>

@@ -35,6 +35,44 @@ test("painel, filtros e atualização manual", async ({ page }, testInfo) => {
     ),
   ).toBe(true);
 });
+
+test("visão geral cabe em iframe estreito e lembra a transparência reduzida", async ({
+  page,
+}) => {
+  await page.route("**/preview-iframe", (route) =>
+    route.fulfill({
+      contentType: "text/html",
+      body: '<iframe title="Jornada" src="/dashboard" style="width:320px;height:680px;border:0"></iframe>',
+    }),
+  );
+  await page.goto("/preview-iframe");
+  const frame = page.frameLocator('iframe[title="Jornada"]');
+  const toggle = frame.getByRole("button", {
+    name: "Sempre reduzir transparência",
+  });
+  const movement = frame.locator(".stat-blue");
+
+  await expect(movement).toBeVisible();
+  await expect(toggle).toHaveAttribute("aria-pressed", "false");
+  expect(
+    await frame.locator("html").evaluate((html) => html.scrollWidth),
+  ).toBeLessThanOrEqual(320);
+
+  await toggle.focus();
+  await page.keyboard.press("Space");
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await expect(frame.locator(".topnav")).toHaveCSS("backdrop-filter", "none");
+  await expect(movement).toHaveCSS("background-image", "none");
+
+  await page.reload();
+  await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  await frame.getByRole("link", { name: "Movimentações", exact: true }).click();
+  await expect(
+    frame.getByRole("heading", { name: "Movimentações", exact: true }),
+  ).toBeVisible();
+  await expect(toggle).toHaveCount(0);
+});
+
 test("jornada mostra timeline e dados próprios do histórico", async ({
   page,
 }, testInfo) => {
