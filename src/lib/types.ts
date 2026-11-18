@@ -56,11 +56,16 @@ export interface Settings {
     average: boolean;
   };
 }
+// Situação dos negócios na aba Etapas: em andamento (aberto), finalizados
+// (ganhos e perdidos) ou os dois. Sem o campo, vale o comportamento antigo
+// (nenhum recorte por situação), que é o que a Visão geral continua usando.
+export type StageStatus = "open" | "closed" | "all";
 export interface Filters {
   from: string;
   to: string;
   pipeline?: number;
   stage?: string;
+  stageStatus?: StageStatus;
   assignedById?: number;
   // Faixa do valor (faturamento) do negócio; o valor ausente conta como 0.
   opportunityMin?: number;
@@ -111,6 +116,9 @@ export interface Retention {
   visits: number;
   currentDeals: number;
   stalledDeals: number;
+  // Etapa final (ganho/perda): o negócio fecha nela e não fica parado, então a
+  // duração é sempre zero e só as contagens fazem sentido.
+  final: boolean;
 }
 export interface DashboardData extends Catalog {
   movements: Movement[];

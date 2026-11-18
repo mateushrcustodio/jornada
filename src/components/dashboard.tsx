@@ -50,6 +50,7 @@ import { useColumnDrag } from "./column-drag";
 import { useColumnOrder } from "./column-order";
 import { useApp } from "./provider";
 import { StageOrderToggle, useStageOrder } from "./stage-order";
+import { StageStatusToggle, useStageStatus } from "./stage-status";
 import { StageTimePanel } from "./stage-time-chart";
 import { useResource } from "./use-resource";
 import {
@@ -122,6 +123,9 @@ export function Dashboard({ view }: { view: View }) {
     "stalledSort",
     () => undefined,
   );
+  // Situação dos negócios da aba Etapas (em andamento por padrão; a escolha fica
+  // salva neste navegador). Só vai ao servidor na aba Etapas.
+  const [stageStatus, setStageStatus] = useStageStatus();
   const [from, setFrom] = useSticky("from", () => "");
   const [to, setTo] = useSticky("to", () => "");
   const usersResource = useResource<UserOption[]>(
@@ -164,6 +168,7 @@ export function Dashboard({ view }: { view: View }) {
         ...range,
         pipeline: pipeline ? Number(pipeline) : undefined,
         stage: stage || undefined,
+        stageStatus: view === "stages" ? stageStatus : undefined,
         assignedById: assigned ? Number(assigned) : undefined,
         opportunityMin: minValue ?? undefined,
         opportunityMax: maxValue ?? undefined,
@@ -582,6 +587,13 @@ export function Dashboard({ view }: { view: View }) {
           )}
           {view === "stages" && (
             <>
+              <div className="stage-status-bar">
+                <span className="muted">Negócios analisados</span>
+                <StageStatusToggle
+                  status={stageStatus}
+                  onChange={setStageStatus}
+                />
+              </div>
               <div className="split">
                 <RetentionChart
                   rows={data.retention}
@@ -600,7 +612,12 @@ export function Dashboard({ view }: { view: View }) {
                         Os contadores de negócios e parados representam a
                         posição atual, inclusive sem movimentações recentes.
                         Etapas concluídas de ganho ou perda têm duração final
-                        zero.
+                        zero e aparecem sem tempo (traço), só com as contagens.
+                      </p>
+                      <p>
+                        O seletor &quot;Negócios analisados&quot; escolhe entre
+                        os em andamento (padrão), os finalizados (ganhos e
+                        perdidos) ou os dois juntos.
                       </p>
                       <p>Cada pipeline é calculado separadamente.</p>
                     </div>
@@ -796,7 +813,11 @@ function RetentionChart({
                   </span>
                 </div>
                 <strong className="retention-value">
-                  {r.visits ? duration(r.average) : "Sem passagens"}
+                  {!r.visits
+                    ? "Sem passagens"
+                    : r.final
+                      ? "—"
+                      : duration(r.average)}
                 </strong>
               </div>
               <div className="bar-track">
@@ -1481,9 +1502,15 @@ function RetentionTable({
       </>
     ),
     average: (row) => (
-      <strong>{row.visits ? duration(row.average) : "Sem passagens"}</strong>
+      <strong>
+        {!row.visits
+          ? "Sem passagens"
+          : row.final
+            ? "—"
+            : duration(row.average)}
+      </strong>
     ),
-    maximum: (row) => (row.visits ? duration(row.maximum) : "—"),
+    maximum: (row) => (row.visits && !row.final ? duration(row.maximum) : "—"),
     sample: (row) => (
       <>
         {row.sampleDeals}{" "}

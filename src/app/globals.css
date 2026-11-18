@@ -2401,6 +2401,15 @@ th.num-cell .th-inner {
   color: var(--ink);
   box-shadow: 0 0 0 1px var(--line);
 }
+/* Seletor de situação dos negócios (aba Etapas), acima das listas. */
+.stage-status-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin-bottom: 16px;
+  font-size: 13px;
+}
 /* Seletor de ordem da lista de etapas: em telas estreitas desce para a linha de baixo. */
 .retention-panel .panel-heading {
   flex-wrap: wrap;

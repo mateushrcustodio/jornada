@@ -23,6 +23,7 @@ function row(
     visits,
     currentDeals: 0,
     stalledDeals: 0,
+    final: false,
   };
 }
 

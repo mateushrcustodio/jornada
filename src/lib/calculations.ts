@@ -11,6 +11,7 @@ import type {
   Stage,
   StalledDeal,
   StalledSort,
+  StageStatus,
   Visit,
 } from "./types";
 import { LEGACY_STAGE_NAMES } from "./legacy-stages";
@@ -19,6 +20,21 @@ export const stageKey = (categoryId: number, id: string) =>
   `${categoryId}:${id}`;
 export const isClosed = (deal: Deal) =>
   ["S", "F"].includes(deal.stageSemanticId || "");
+// Situação do negócio na aba Etapas. Sem `status` (Visão geral) não há recorte.
+export function matchesStageStatus(deal: Deal, status?: StageStatus) {
+  if (!status || status === "all") return true;
+  return status === "closed" ? isClosed(deal) : !isClosed(deal);
+}
+// Etapa final: só passagens de ganho/perda e duração máxima zero. Se o negócio
+// foi reaberto depois do ganho/perda, a etapa tem duração real e deixa de ser
+// final.
+export const isFinalStage = (
+  rows: { entry: { STAGE_SEMANTIC_ID: string } }[],
+  maximum: number,
+) =>
+  rows.length > 0 &&
+  maximum === 0 &&
+  rows.every((row) => ["S", "F"].includes(row.entry.STAGE_SEMANTIC_ID));
 export function resolveStage(
   catalog: Catalog,
   entry: { CATEGORY_ID: number; STAGE_ID: string },
@@ -214,7 +230,11 @@ export function buildDashboard(
 ): DashboardData {
   const { enabledStage } = stageFilters(filters, settings);
   const allVisits = deals
-    .filter((deal) => matchesDealFilters(deal, filters))
+    .filter(
+      (deal) =>
+        matchesDealFilters(deal, filters) &&
+        matchesStageStatus(deal, filters.stageStatus),
+    )
     .map((deal) => ({
       deal,
       visits: calculateVisits(history, deal, catalog, now),
@@ -277,6 +297,7 @@ export function buildDashboard(
         (v) => stageKey(v.stage.categoryId, v.stage.id) === key,
       );
       const stage = sample[0]?.stage ?? live[0].stage;
+      const maximum = Math.max(0, ...sample.map((v) => v.duration));
       return {
         stage,
         pipeline:
@@ -285,7 +306,8 @@ export function buildDashboard(
         average: sample.length
           ? sample.reduce((sum, v) => sum + v.duration, 0) / sample.length
           : 0,
-        maximum: Math.max(0, ...sample.map((v) => v.duration)),
+        maximum,
+        final: isFinalStage(sample, maximum),
         sampleDeals: new Set(sample.map((v) => v.deal.id)).size,
         visits: sample.length,
         currentDeals: live.length,

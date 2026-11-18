@@ -305,12 +305,8 @@ export function buildStageInsights(
       stage: retention.stage,
       pipelineId: retention.stage.categoryId,
       pipeline: retention.pipeline,
-      // Se o negócio foi reaberto depois do ganho/perda, a etapa final tem
-      // duração real e continua no gráfico.
-      final:
-        rows.length > 0 &&
-        retention.maximum === 0 &&
-        rows.every((row) => ["S", "F"].includes(row.entry.STAGE_SEMANTIC_ID)),
+      // Mesma regra do detalhamento por etapa (`retention.final`).
+      final: retention.final,
       passages: rows.length,
       deals: deals.size,
       open: rows.filter((row) => row.current).length,

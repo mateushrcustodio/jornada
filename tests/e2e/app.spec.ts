@@ -1086,3 +1086,61 @@ test("Etapas: trocar a ordem não rola a página", async ({
   await page.waitForTimeout(500);
   expect(await scrollY()).toBe(before);
 });
+
+test("Etapas: seletor de situação começa em Em andamento, inclui finalizados e lembra a escolha", async ({
+  page,
+}) => {
+  await page.goto("/dashboard/stages");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  const group = page.getByRole("group", { name: "Situação dos negócios" });
+  const open = group.getByRole("button", { name: "Em andamento", exact: true });
+  const closed = group.getByRole("button", { name: "Finalizados", exact: true });
+  const all = group.getByRole("button", {
+    name: "Em andamento + finalizados",
+    exact: true,
+  });
+  await expect(open).toHaveAttribute("aria-pressed", "true");
+  const list = page
+    .locator("section.panel")
+    .filter({ has: page.getByRole("heading", { name: "Tempo médio por etapa" }) });
+  // Em andamento: as etapas finais (Ganho e Perdido) não entram.
+  await expect(list.locator(".retention-row").first()).toBeVisible();
+  await expect(list.locator(".retention-row", { hasText: "Ganho" })).toHaveCount(0);
+  await expect(list.locator(".retention-row", { hasText: "Perdido" })).toHaveCount(0);
+  // Finalizados: aparecem Ganho e Perdido; a etapa final (Perdido) fica sem tempo ("—").
+  const request = page.waitForRequest(
+    (r) =>
+      r.url().endsWith("/api/dashboard") &&
+      r.method() === "POST" &&
+      r.postDataJSON().filters.stageStatus === "closed",
+  );
+  await closed.click();
+  await request;
+  await expect(closed).toHaveAttribute("aria-pressed", "true");
+  await expect(list.locator(".retention-row", { hasText: "Ganho" }).first()).toBeVisible();
+  const lost = list.locator(".retention-row", { hasText: "Perdido" }).first();
+  await expect(lost).toBeVisible();
+  await expect(lost.locator(".retention-value")).toHaveText("—");
+  // Em andamento + finalizados traz os dois grupos.
+  await all.click();
+  await expect(all).toHaveAttribute("aria-pressed", "true");
+  await expect(list.locator(".retention-row", { hasText: "Ganho" }).first()).toBeVisible();
+  await expect(list.locator(".retention-row", { hasText: "Qualificação" }).first()).toBeVisible();
+  // A escolha fica salva ao recarregar.
+  await page.reload();
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  await expect(
+    page
+      .getByRole("group", { name: "Situação dos negócios" })
+      .getByRole("button", { name: "Em andamento + finalizados", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+});
+
+test("Visão geral não envia o filtro de situação das Etapas", async ({ page }) => {
+  const request = page.waitForRequest(
+    (r) => r.url().endsWith("/api/dashboard") && r.method() === "POST",
+  );
+  await page.goto("/dashboard");
+  const body = (await request).postDataJSON();
+  expect(body.filters.stageStatus).toBeUndefined();
+});

@@ -25,6 +25,7 @@ export const filtersSchema = z
     to: z.iso.datetime({ offset: true }),
     pipeline: z.number().int().nonnegative().optional(),
     stage: z.string().max(100).optional(),
+    stageStatus: z.enum(["open", "closed", "all"]).optional(),
     assignedById: z.number().int().positive().optional(),
     opportunityMin: z.number().min(0).max(1e13).optional(),
     opportunityMax: z.number().min(0).max(1e13).optional(),

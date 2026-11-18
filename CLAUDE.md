@@ -55,6 +55,7 @@ src/components/
                             Movimentações e Parados usam /api/dashboard/page (paginação controlada) e a mesma
                             `ReorderableTable` (colunas arrastáveis; setas de ordenação onde `sortKeys` indica)
   stage-time-chart.tsx      aba Etapas: gráfico "Tempo médio no funil" + janela "Ver mais detalhes"
+  stage-status.tsx          seletor "Negócios analisados" da aba Etapas (Em andamento / Finalizados / Em andamento + finalizados; padrão Em andamento; escolha em localStorage `jornada:stage-status`); regras em lib/stage-status.ts, filtro `stageStatus` em `Filters`
   stage-order.tsx           seletor Decrescente/Crescente/Funil da lista "Tempo médio por etapa" e da tabela "Detalhamento por etapa" (aba Etapas, mesma escolha; escolha em localStorage); regra de ordenação em lib/stage-order.ts. A tabela Detalhamento (`RetentionTable` em dashboard.tsx) também usa `ReorderableTable`: colunas arrastáveis (`jornada-crm.stage-columns.v1`), seta em Tempo médio (segue o seletor) e em Maior tempo (`sortRetentionByMaximum`, local da tabela; o seletor solta essa ordenação)
   stage-pie.tsx             pizza do tempo médio + botão Colunas/Pizza (escolha em localStorage); chart-tip.tsx = dicas dos gráficos
   column-drag.ts            hook de arrastar colunas (compartilhado por Movimentações e Parados); column-order.ts guarda a ordem
@@ -82,6 +83,7 @@ tests/          *.test.ts (vitest; performance.test.ts e pagination.test.ts usam
 - **Única escrita no CRM:** `crm.timeline.comment.add` da autópsia (texto montado no servidor, só negócio ganho/perdido). Não adicione outras escritas sem pedido explícito.
 - **Modo demo (`DEMO_MODE=true`)** usa dados de `src/lib/demo.ts` (negócio 8061 e fechados 9001–9006). Nunca misture dados demo com resposta ou erro de portal real.
 - **Totais parciais nunca aparecem como completos:** acima do orçamento de negócios detalhados (padrão 1.470), de 10.000 ativos ou de 10.000 movimentações do período, a API avisa (`partial` + `warning` dizendo quantos ficaram de fora) em vez de truncar em silêncio.
+- **Situação na aba Etapas:** `Filters.stageStatus` (`open` | `closed` | `all`) só é enviado pela aba Etapas e filtra os negócios em `buildDashboard` via `matchesStageStatus` (finalizados = semântica S/F). Sem o campo (Visão geral), nada muda. Etapa final de ganho/perda (`Retention.final`, regra `isFinalStage`) tem duração zero: aparece com "—" e só com contagens. Não adiciona chamadas ao Bitrix24. Testes em `tests/stage-status.test.ts`.
 - **Datas** em `America/Sao_Paulo`. Durações são corridas (sem expediente). Limite de parado é inclusivo (`>=`).
 - Mantenha o resultado dos cálculos idêntico quando otimizar: há testes de equivalência em `tests/performance.test.ts`.
 
