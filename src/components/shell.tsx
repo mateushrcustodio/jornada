@@ -1,5 +1,13 @@
 "use client";
-import { ArrowLeft, Layers2, Settings2 } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowLeftRight,
+  Layers2,
+  LayoutGrid,
+  ListTree,
+  Pause,
+  Settings2,
+} from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -14,10 +22,14 @@ import { useApp } from "./provider";
 import { useReturnCard } from "./return-card";
 
 const navigation = [
-  { href: "/dashboard", label: "Visão geral" },
-  { href: "/dashboard/movements", label: "Movimentações" },
-  { href: "/dashboard/stalled", label: "Parados" },
-  { href: "/dashboard/stages", label: "Etapas" },
+  { href: "/dashboard", label: "Visão geral", icon: LayoutGrid },
+  {
+    href: "/dashboard/movements",
+    label: "Movimentações",
+    icon: ArrowLeftRight,
+  },
+  { href: "/dashboard/stalled", label: "Parados", icon: Pause },
+  { href: "/dashboard/stages", label: "Etapas", icon: ListTree },
 ];
 const transparencyKey = "jornada-crm.reduce-transparency";
 
@@ -64,13 +76,14 @@ function NavPills({ path }: { path: string }) {
           opacity: box ? 1 : 0,
         }}
       />
-      {navigation.map(({ href, label }) => (
+      {navigation.map(({ href, label, icon: Icon }) => (
         <Link
           key={href}
           href={href}
           className={`nav-link ${path === href ? "active" : ""}`}
           aria-current={path === href ? "page" : undefined}
         >
+          {path === "/dashboard" && <Icon size={15} aria-hidden="true" />}
           {label}
         </Link>
       ))}

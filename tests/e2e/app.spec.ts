@@ -51,8 +51,10 @@ test("visão geral cabe em iframe estreito e lembra a transparência reduzida", 
     name: "Sempre reduzir transparência",
   });
   const movement = frame.locator(".stat-blue");
+  const headerArt = frame.locator(".overview-hero-art");
 
   await expect(movement).toBeVisible();
+  await expect(headerArt).toBeVisible();
   await expect(toggle).toHaveAttribute("aria-pressed", "false");
   expect(
     await frame.locator("html").evaluate((html) => html.scrollWidth),
@@ -63,6 +65,7 @@ test("visão geral cabe em iframe estreito e lembra a transparência reduzida", 
   await expect(toggle).toHaveAttribute("aria-pressed", "true");
   await expect(frame.locator(".topnav")).toHaveCSS("backdrop-filter", "none");
   await expect(movement).toHaveCSS("background-image", "none");
+  await expect(headerArt).toBeHidden();
 
   await page.reload();
   await expect(toggle).toHaveAttribute("aria-pressed", "true");

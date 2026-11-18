@@ -6,8 +6,10 @@ import {
   ArrowUpDown,
   ArrowUpRight,
   CalendarDays,
+  Check,
   CircleDollarSign,
   Clock3,
+  Flag,
   GripVertical,
   Layers3,
   Pause,
@@ -276,7 +278,28 @@ export function Dashboard({ view }: { view: View }) {
     effectivePeriod !== settings.defaultPeriod;
   return (
     <>
-      <div className="page-heading">
+      <div
+        className={
+          view === "overview" ? "page-heading overview-hero" : "page-heading"
+        }
+      >
+        {view === "overview" && (
+          <div className="overview-hero-art" aria-hidden="true">
+            <span className="overview-glass-ribbon" />
+            <span className="overview-prism overview-prism-start">
+              <Check />
+            </span>
+            <span className="overview-prism overview-prism-route">
+              <Route />
+            </span>
+            <span className="overview-prism overview-prism-done">
+              <Check />
+            </span>
+            <span className="overview-prism overview-prism-end">
+              <Flag />
+            </span>
+          </div>
+        )}
         <div>
           <h1>{titles[view]}</h1>
           <p>{subtitles[view]}</p>
@@ -575,25 +598,23 @@ export function Dashboard({ view }: { view: View }) {
           )}
           {view === "overview" && (
             <>
-              <Metrics data={data} />
-              <div className="split">
-                <div className="stack">
-                  <Movements
-                    rows={data.movements}
-                    pipelines={data.pipelines}
-                    compact
-                  />
-                  <TrackedDeals data={data} />
-                </div>
-                <div className="stack">
-                  <RetentionChart rows={data.retention} />
-                  <Stalled
-                    rows={data.stalled}
-                    pipelines={data.pipelines}
-                    compact
-                    hours={settings.stalledHours}
-                  />
-                </div>
+              <div className="overview-insights">
+                <Metrics data={data} />
+                <RetentionChart rows={data.retention} />
+              </div>
+              <div className="overview-activity">
+                <Movements
+                  rows={data.movements}
+                  pipelines={data.pipelines}
+                  compact
+                />
+                <Stalled
+                  rows={data.stalled}
+                  pipelines={data.pipelines}
+                  compact
+                  hours={settings.stalledHours}
+                />
+                <TrackedDeals data={data} />
               </div>
             </>
           )}
@@ -738,7 +759,7 @@ function Metrics({ data }: { data: DashboardData }) {
       value: data.activeCount.toLocaleString("pt-BR"),
       detail: "ativos nos filtros",
       icon: Layers3,
-      color: "ink",
+      color: "mint",
     },
     {
       key: "stalled" as const,
@@ -746,7 +767,7 @@ function Metrics({ data }: { data: DashboardData }) {
       value: data.stalled.length.toLocaleString("pt-BR"),
       detail: `há ${settings.stalledHours}h ou mais na etapa`,
       icon: Pause,
-      color: "amber",
+      color: "coral",
     },
     {
       key: "average" as const,
@@ -756,26 +777,26 @@ function Metrics({ data }: { data: DashboardData }) {
         ? "por passagem no período"
         : "sem passagens no período",
       icon: Timer,
-      color: "ink",
+      color: "violet",
     },
   ];
+  const visible = metrics.filter((metric) => settings.indicators[metric.key]);
+  if (!visible.length) return null;
   return (
-    <div className="stat-grid">
-      {metrics
-        .filter((m) => settings.indicators[m.key])
-        .map(({ key, label, value, detail, icon: Icon, color }) => (
-          <article className={`stat-card stat-${color}`} key={key}>
-            <div className="stat-top">
-              <span>{label}</span>
-              <span className="stat-icon" aria-hidden="true">
-                <Icon size={18} />
-              </span>
-            </div>
-            <strong className="stat-value">{value}</strong>
-            <span className="stat-detail">{detail}</span>
-          </article>
-        ))}
-    </div>
+    <section className="stat-grid" aria-label="Indicadores da jornada">
+      {visible.map(({ key, label, value, detail, icon: Icon, color }) => (
+        <article className={`stat-card stat-${color}`} key={key}>
+          <div className="stat-top">
+            <span>{label}</span>
+            <span className="stat-icon" aria-hidden="true">
+              <Icon size={18} />
+            </span>
+          </div>
+          <strong className="stat-value">{value}</strong>
+          <span className="stat-detail">{detail}</span>
+        </article>
+      ))}
+    </section>
   );
 }
 
