@@ -10,7 +10,14 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { type ReactNode, useEffect, useState } from "react";
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { BrandMark } from "./brand";
 import { useApp } from "./provider";
 import { useReturnCard } from "./return-card";
@@ -27,9 +34,90 @@ const navigation = [
 ];
 const transparencyKey = "jornada-crm.reduce-transparency";
 
+// Tempo (ms) que cada borda da "gota" leva para chegar ao destino. A borda da
+// frente chega antes e a de trás vem depois: no meio do caminho a pílula se
+// estica e depois se recolhe, como o vidro líquido.
+const LEADING_EDGE_MS = 340;
+const TRAILING_EDGE_MS = 560;
+const STRETCH_MS = 460;
+
 function NavPills({ path }: { path: string }) {
+  const navRef = useRef<HTMLElement>(null);
+  const indicatorRef = useRef<HTMLSpanElement>(null);
+  const last = useRef<{ left: number; top: number } | null>(null);
+  const settle = useRef<number | undefined>(undefined);
+
+  // Posiciona o indicador sobre o link ativo. Mexe direto no DOM (variáveis CSS)
+  // para não re-renderizar o menu a cada medição nem precisar de setState.
+  const place = useCallback((animate: boolean) => {
+    const nav = navRef.current;
+    const indicator = indicatorRef.current;
+    if (!nav || !indicator) return;
+    const link = nav.querySelector<HTMLElement>('[aria-current="page"]');
+    if (!link) {
+      // Fora das abas (ex.: Configurações) o indicador some.
+      delete nav.dataset.indicator;
+      last.current = null;
+      return;
+    }
+    const left = link.offsetLeft;
+    const top = link.offsetTop;
+    const right = nav.clientWidth - left - link.offsetWidth;
+    const before = last.current;
+    const moved =
+      before !== null && (before.left !== left || before.top !== top);
+    const slide = animate && moved;
+    // Indo para a direita a borda direita lidera; indo para a esquerda, a esquerda.
+    const rightward = before === null || left > before.left;
+    const set = (name: string, value: string) =>
+      indicator.style.setProperty(name, value);
+    set(
+      "--ind-left-ms",
+      `${slide ? (rightward ? TRAILING_EDGE_MS : LEADING_EDGE_MS) : 0}ms`,
+    );
+    set(
+      "--ind-right-ms",
+      `${slide ? (rightward ? LEADING_EDGE_MS : TRAILING_EDGE_MS) : 0}ms`,
+    );
+    // O Chrome só inicia a transição de left/right se a duração já estiver
+    // aplicada antes de a posição mudar; por isso o estilo é calculado aqui.
+    void indicator.offsetWidth;
+    set("--ind-left", `${left}px`);
+    set("--ind-right", `${right}px`);
+    set("--ind-top", `${top}px`);
+    set("--ind-height", `${link.offsetHeight}px`);
+    last.current = { left, top };
+    nav.dataset.indicator = "ready";
+    if (slide) {
+      indicator.dataset.moving = "true";
+      window.clearTimeout(settle.current);
+      settle.current = window.setTimeout(() => {
+        delete indicator.dataset.moving;
+      }, STRETCH_MS);
+    }
+  }, []);
+
+  // Trocou de aba: desliza até a nova (a primeira medição não anima).
+  useLayoutEffect(() => {
+    place(true);
+  }, [path, place]);
+
+  // Janela, fonte ou layout mudaram: reposiciona sem animar.
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const observer = new ResizeObserver(() => place(false));
+    observer.observe(nav);
+    nav.querySelectorAll("a").forEach((link) => observer.observe(link));
+    return () => {
+      observer.disconnect();
+      window.clearTimeout(settle.current);
+    };
+  }, [place]);
+
   return (
-    <nav className="nav-pills" aria-label="Navegação principal">
+    <nav ref={navRef} className="nav-pills" aria-label="Navegação principal">
+      <span ref={indicatorRef} className="nav-indicator" aria-hidden="true" />
       {navigation.map(({ href, label, icon: Icon }) => (
         <Link
           key={href}

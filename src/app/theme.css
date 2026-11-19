@@ -128,7 +128,7 @@
   font-weight: 600;
   transition:
     background-color 160ms ease,
-    color 160ms ease;
+    color 280ms ease;
 }
 
 .jornada-shell .nav-link:hover {
@@ -136,8 +136,15 @@
 }
 
 .jornada-shell .nav-link[aria-current="page"] {
-  border-color: #27448b;
   color: #fff;
+}
+
+/* A "gota" azul: um único elemento que desliza entre as abas (posicionado por
+   variáveis CSS que o shell.tsx atualiza). Cada borda tem seu próprio tempo, e
+   por isso a pílula se estica no caminho e depois se recolhe. */
+.jornada-shell .nav-indicator,
+.jornada-shell .nav-pills:not([data-indicator]) .nav-link[aria-current="page"] {
+  border-color: #27448b;
   background:
     radial-gradient(
       ellipse at 36% -15%,
@@ -149,6 +156,55 @@
     inset 0 1px 2px rgb(255 255 255 / 55%),
     inset 0 -2px 0 #1c367b,
     0 4px 9px rgb(34 67 148 / 27%);
+}
+
+.jornada-shell .nav-indicator {
+  --ind-ease: cubic-bezier(0.25, 1.1, 0.4, 1);
+  position: absolute;
+  z-index: 0;
+  top: var(--ind-top, 0);
+  right: var(--ind-right, 0);
+  left: var(--ind-left, 0);
+  height: var(--ind-height, 44px);
+  border: 1px solid #27448b;
+  border-radius: var(--radius-pill);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    left var(--ind-left-ms, 0ms) var(--ind-ease),
+    right var(--ind-right-ms, 0ms) var(--ind-ease),
+    transform 320ms var(--ind-ease),
+    filter 320ms ease,
+    box-shadow 320ms ease;
+}
+
+/* Reflexo de vidro no topo da gota. */
+.jornada-shell .nav-indicator::after {
+  content: "";
+  position: absolute;
+  inset: 2px 12% auto;
+  height: 42%;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgb(255 255 255 / 30%), transparent);
+}
+
+.jornada-shell .nav-pills[data-indicator] .nav-indicator {
+  opacity: 1;
+}
+
+/* Enquanto desliza a gota cresce um pouco e fica mais brilhante. */
+.jornada-shell .nav-indicator[data-moving] {
+  transform: scale(1.035, 1.12);
+  filter: brightness(1.12) saturate(1.2);
+  box-shadow:
+    inset 0 1px 2px rgb(255 255 255 / 60%),
+    inset 0 -2px 0 #1c367b,
+    0 10px 22px rgb(34 67 148 / 38%);
+}
+
+/* O fundo do hover não pode cobrir a gota que passa por baixo do link ativo. */
+.jornada-shell .nav-pills[data-indicator] .nav-link[aria-current="page"] {
+  background: transparent;
 }
 
 .jornada-shell .topnav-right {
@@ -758,6 +814,30 @@
   background: var(--soft);
 }
 
+/* Nas tabelas (coluna Movimentação, Etapa atual...) o nome da etapa nunca é
+   quebrado dentro do chip: a regra acima, pensada para as listas estreitas,
+   fazia "Reunião" virar "Reuni / ão". Se faltar espaço, é o chip inteiro (e a
+   seta) que desce para a linha de baixo, e a tabela rola na horizontal. */
+.jornada-shell td .stage-badge {
+  flex: none;
+  max-width: none;
+  overflow-wrap: normal;
+  white-space: nowrap;
+}
+
+.jornada-shell .movement-stages {
+  flex-wrap: wrap;
+  gap: 6px 8px;
+}
+
+.jornada-shell .movement-stages > svg {
+  flex: none;
+}
+
+.jornada-shell td[data-column="movement"] {
+  min-width: 340px;
+}
+
 .jornada-shell .critical .stalled-time span:last-child {
   padding: 2px 7px;
   border-radius: var(--radius-pill);
@@ -1009,6 +1089,7 @@
   .jornada-shell
     :is(
       .nav-link[aria-current="page"],
+      .nav-indicator,
       .transparency-toggle[aria-pressed="true"]
     ) {
     border-color: Highlight;
