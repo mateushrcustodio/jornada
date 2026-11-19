@@ -109,9 +109,12 @@ describe("tipo de etapa na aba Etapas", () => {
   it("sem o campo (Visão geral) o resultado é o mesmo de todas as etapas", () => {
     const legacy = run(undefined);
     const all = run("all");
-    // Só o ciclo até concluir (extra da aba Etapas) separa as duas respostas.
+    // Só o ciclo até concluir e o destino da passagem (extras da aba Etapas)
+    // separam as duas respostas.
     const noCycle = (data: typeof all) =>
-      data.movements.map(({ cycle, ...rest }) => (void cycle, rest));
+      data.movements.map(
+        ({ cycle, exit, ...rest }) => (void cycle, void exit, rest),
+      );
     expect(noCycle(all)).toEqual(noCycle(legacy));
     expect(all.retention).toEqual(legacy.retention);
     expect(legacy.movements.every((m) => m.cycle === undefined)).toBe(true);

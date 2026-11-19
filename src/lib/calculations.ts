@@ -246,6 +246,8 @@ export function buildDashboard(
   // O ciclo até concluir só é calculado quando a aba Etapas pede finalizados.
   const withCycle =
     filters.stageStatus === "closed" || filters.stageStatus === "all";
+  // O destino de cada passagem (funil de conversão) também é só da aba Etapas.
+  const withExit = filters.stageStatus !== undefined;
   const movements = allVisits
     .flatMap(({ deal, visits }) => {
       // Primeira etapa registrada do negócio: início do ciclo até concluir.
@@ -253,7 +255,8 @@ export function buildDashboard(
         ? Date.parse(visits[0].entry.CREATED_TIME)
         : 0;
       return visits
-        .filter((v) => {
+        .map((v, i) => ({ v, next: visits[i + 1] }))
+        .filter(({ v }) => {
           const time = Date.parse(v.entry.CREATED_TIME);
           return (
             time >= Date.parse(filters.from) &&
@@ -262,12 +265,24 @@ export function buildDashboard(
             matchesStageStatus(v.entry.STAGE_SEMANTIC_ID, filters.stageStatus)
           );
         })
-        .map((v) => ({
+        .map(({ v, next }) => ({
           ...v,
           deal,
           url: dealUrl(domain, deal.id),
           ...(withCycle && ["S", "F"].includes(v.entry.STAGE_SEMANTIC_ID)
             ? { cycle: Math.max(0, Date.parse(v.entry.CREATED_TIME) - started) }
+            : {}),
+          // O destino vem do histórico inteiro do negócio, então continua
+          // valendo mesmo quando a próxima etapa foi filtrada (ex.: ganho/perda
+          // em "Em andamento").
+          ...(withExit && next
+            ? {
+                exit: {
+                  categoryId: next.entry.CATEGORY_ID,
+                  stageId: next.entry.STAGE_ID,
+                  semanticId: next.entry.STAGE_SEMANTIC_ID,
+                },
+              }
             : {}),
         }));
     })

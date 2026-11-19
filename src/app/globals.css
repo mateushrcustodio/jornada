@@ -1965,6 +1965,128 @@ th.num-cell .th-inner {
   font-weight: 600;
 }
 
+/* ---------- Conversão no funil (aba Etapas) ---------- */
+/* Cada barra tem a largura das entradas da etapa e é cortada em segmentos por
+   destino. A cor nunca é o único sinal: legenda, dica e rótulo de acessibilidade
+   trazem os mesmos números. */
+.funnel-panel {
+  margin-top: 16px;
+}
+.funnel-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  margin-bottom: 12px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.funnel-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.funnel-key {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+.funnel-list {
+  display: grid;
+  gap: 4px;
+}
+.funnel-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 200px) minmax(0, 1fr) 104px;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+}
+.funnel-row:hover,
+.funnel-row:focus-visible {
+  background: var(--soft);
+}
+.funnel-row:focus-visible {
+  outline: 2px solid var(--blue);
+  outline-offset: 1px;
+}
+.funnel-label {
+  min-width: 0;
+}
+.funnel-track {
+  display: flex;
+  align-items: center;
+  height: 22px;
+  min-width: 0;
+}
+.funnel-bar {
+  display: flex;
+  gap: 2px;
+  height: 100%;
+}
+.funnel-seg {
+  display: block;
+  flex-basis: 0;
+  min-width: 3px;
+  border-radius: 3px;
+}
+.funnel-advanced {
+  background: var(--blue);
+}
+.funnel-won {
+  background: var(--green);
+}
+.funnel-returned {
+  background: var(--amber);
+}
+.funnel-lost {
+  background: var(--red);
+}
+.funnel-staying {
+  background: var(--soft-strong);
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.funnel-other {
+  background: repeating-linear-gradient(
+    135deg,
+    var(--soft-strong) 0 3px,
+    #fff 3px 6px
+  );
+  box-shadow: inset 0 0 0 1px var(--line-strong);
+}
+.funnel-values {
+  display: grid;
+  justify-items: end;
+  line-height: 1.25;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.funnel-values strong {
+  color: var(--ink);
+  font-size: 14px;
+  font-weight: 600;
+}
+.funnel-values small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.funnel-note {
+  margin-top: 14px;
+  color: var(--faint);
+  font-size: 12px;
+  line-height: 1.5;
+}
+@media (max-width: 640px) {
+  .funnel-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 6px;
+  }
+  .funnel-label {
+    grid-column: 1 / -1;
+  }
+}
+
 /* Janela de detalhes */
 .insight-dialog {
   width: min(1180px, calc(100vw - 32px));

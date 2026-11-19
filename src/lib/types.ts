@@ -94,6 +94,13 @@ export interface Visit {
   previousStage?: Stage;
   actor?: string;
 }
+// Para onde o negócio foi logo depois de uma passagem (a entrada seguinte no
+// histórico completo, mesmo fora do período ou do tipo de etapa pedido).
+export interface StageExit {
+  categoryId: number;
+  stageId: string;
+  semanticId: string;
+}
 export interface Movement extends Visit {
   deal: Deal;
   url?: string;
@@ -101,6 +108,9 @@ export interface Movement extends Visit {
   // pede finalizados: tempo desde a primeira etapa registrada do negócio até
   // esta passagem ("ciclo até concluir").
   cycle?: number;
+  // Só na aba Etapas (quando há `stageStatus`): destino da passagem, para o
+  // funil de conversão. Ausente se o negócio ainda está na etapa.
+  exit?: StageExit;
 }
 export interface StalledDeal {
   deal: Deal;

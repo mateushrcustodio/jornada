@@ -1220,3 +1220,47 @@ test("Visão geral não envia o filtro de situação das Etapas", async ({ page 
   const body = (await request).postDataJSON();
   expect(body.filters.stageStatus).toBeUndefined();
 });
+
+test("Etapas: funil de conversão mostra o destino de cada entrada e explica o filtro de finalizados", async ({
+  page,
+}, testInfo) => {
+  await page.goto("/dashboard/stages");
+  await page.getByLabel("Período", { exact: true }).selectOption("30d");
+  const panel = page.locator(".funnel-panel");
+  await expect(
+    panel.getByRole("heading", { name: "Conversão no funil" }),
+  ).toBeVisible();
+  const rows = panel.locator(".funnel-row");
+  await expect(rows.first()).toBeVisible();
+  // Cada linha traz os números da etapa em texto, não só em cor.
+  await expect(rows.first()).toHaveAttribute("aria-label", /entradas/);
+  await expect(panel.locator(".funnel-legend")).toContainText("Avançou");
+  // Na ordem do funil, só com etapas em andamento (sem ganho/perda).
+  await expect(panel.locator(".funnel-row", { hasText: "Perdido" })).toHaveCount(
+    0,
+  );
+  if (testInfo.project.name === "desktop") {
+    await rows.nth(1).hover();
+    await expect(page.getByRole("tooltip")).toContainText(
+      "avanço (dos que saíram)",
+    );
+  }
+  expect(
+    await page.evaluate(() => {
+      const list = document.querySelector(".funnel-list")!;
+      return list.scrollWidth <= list.clientWidth;
+    }),
+  ).toBe(true);
+  // Só finalizados: não há conversão entre etapas para mostrar, e a tela explica.
+  await page
+    .getByRole("group", { name: "Tipo de etapa" })
+    .getByRole("button", { name: "Finalizados", exact: true })
+    .click();
+  await expect(panel).toContainText("O funil usa as etapas em andamento");
+  await expect(panel.locator(".funnel-row")).toHaveCount(0);
+  await expect(
+    page
+      .getByRole("group", { name: "Tipo de etapa" })
+      .getByRole("button", { name: "Finalizados", exact: true }),
+  ).toHaveAttribute("aria-pressed", "true");
+});

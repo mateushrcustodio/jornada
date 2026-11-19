@@ -3,10 +3,16 @@ import type {
   Deal,
   Movement,
   Stage,
+  StageExit,
   StalledDeal,
   UserOption,
 } from "./types";
 import { stageKey } from "./calculations";
+import {
+  classifyPassage,
+  summarizeFunnel,
+  type FunnelStat,
+} from "./funnel";
 
 // Análise detalhada do tempo por etapa, montada no navegador a partir do
 // painel completo que já chegou (movimentações do período + parados). Não faz
@@ -100,6 +106,8 @@ export interface StageInsight {
   // Só nas etapas finais, quando o painel traz o ciclo (aba Etapas com finalizados).
   cycle?: CycleStat;
   stalledRevenue: number;
+  // Para onde foram as passagens da etapa (funil de conversão).
+  funnel: FunnelStat;
   // Média da etapa dividida pela média do funil (1 = igual à média).
   vsFunnel?: number;
   buckets: BucketStat[];
@@ -200,6 +208,23 @@ export function buildStageInsights(
       if (sorted[i + 1]) nextOf.set(row, sorted[i + 1]);
     });
   }
+
+  // Destino de uma passagem: o que o servidor já trouxe (histórico completo) ou,
+  // na falta dele, a movimentação seguinte que está no painel.
+  const stageByKey = new Map(data.stages.map((stage) => [keyOf(stage), stage]));
+  const lookupStage = (categoryId: number, stageId: string) =>
+    stageByKey.get(stageKey(categoryId, stageId));
+  const exitOf = (row: Movement): StageExit | undefined => {
+    if (row.exit) return row.exit;
+    const next = nextOf.get(row);
+    return next
+      ? {
+          categoryId: next.stage.categoryId,
+          stageId: next.stage.id,
+          semanticId: next.entry.STAGE_SEMANTIC_ID,
+        }
+      : undefined;
+  };
 
   const movementsByStage = new Map<string, Movement[]>();
   for (const row of data.movements) {
@@ -347,6 +372,11 @@ export function buildStageInsights(
           }
         : undefined,
       stalledRevenue: sumDeals(stalled.map((row) => row.deal)),
+      funnel: summarizeFunnel(
+        rows.map((row) =>
+          classifyPassage(row.stage, row.current, exitOf(row), lookupStage),
+        ),
+      ),
       buckets: DURATION_BUCKETS.map((bucket, i) => {
         const min = i ? DURATION_BUCKETS[i - 1].max : 0;
         const inside = rows.filter(

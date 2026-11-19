@@ -22,8 +22,9 @@ export function useTip() {
   const show = (target: Element, content: ReactNode) => {
     const box = target.closest(".chart-frame")?.getBoundingClientRect();
     if (!box) return;
-    // Nas colunas, a dica nasce no topo da barra (e não do alvo inteiro).
-    const anchor = target.querySelector(".stage-column-bar") ?? target;
+    // Nas colunas e no funil, a dica nasce no topo da barra (e não do alvo inteiro).
+    const anchor =
+      target.querySelector(".stage-column-bar, .funnel-bar") ?? target;
     const rect = anchor.getBoundingClientRect();
     place(
       box,

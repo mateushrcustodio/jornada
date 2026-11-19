@@ -57,6 +57,7 @@ import { useColumnOrder } from "./column-order";
 import { useApp } from "./provider";
 import { StageOrderToggle, useStageOrder } from "./stage-order";
 import { StageStatusToggle, useStageStatus } from "./stage-status";
+import { StageFunnelPanel } from "./stage-funnel";
 import { StageTimePanel } from "./stage-time-chart";
 import { useResource } from "./use-resource";
 import {
@@ -661,6 +662,12 @@ export function Dashboard({ view }: { view: View }) {
                   />
                 </div>
               </div>
+              {stageInsights && (
+                <StageFunnelPanel
+                  insights={stageInsights}
+                  stageStatus={stageStatus}
+                />
+              )}
               <RetentionTable
                 rows={data.retention}
                 pipelines={data.pipelines}

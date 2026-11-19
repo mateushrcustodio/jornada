@@ -78,7 +78,7 @@ function pieViews(
 const pieNote = (model: PieModel) =>
   `Cada fatia é a parte de uma etapa na soma dos tempos médios (${duration(model.total)}), na ordem do funil, a partir das 12h. Etapas sem passagem no período não têm fatia.`;
 
-function PipelineTabs({
+export function PipelineTabs({
   insights,
   value,
   onChange,
